@@ -24,6 +24,7 @@ export default function FlowerGarden() {
   const [flowers, setFlowers] = useState([]);
   const [isDrawing, setIsDrawing] = useState(false);
   const [selectedColor, setSelectedColor] = useState(COLORS[0]);
+  const [customColor, setCustomColor] = useState('#FF69B4');
   const [brushType, setBrushType] = useState(BRUSH_TYPES.NORMAL);
   const [thickness, setThickness] = useState(4);
   const [showGallery, setShowGallery] = useState(false);
@@ -342,7 +343,7 @@ export default function FlowerGarden() {
           {/* Color Palette */}
           <div className="mb-6">
             <p className="text-lg font-bold mb-3 text-center" style={{ color: '#558B2F' }}>Colors</p>
-            <div className="flex gap-4 justify-center flex-wrap">
+            <div className="flex gap-4 justify-center flex-wrap items-center">
               {COLORS.map((color) => (
                 <button
                   key={color}
@@ -351,6 +352,30 @@ export default function FlowerGarden() {
                   style={{ backgroundColor: color, boxShadow: selectedColor === color ? '0 0 0 4px rgba(46, 125, 50, 0.3)' : '0 4px 6px rgba(0,0,0,0.2)' }}
                 />
               ))}
+              
+              {/* Custom Color Picker */}
+              <div className="relative">
+                <input
+                  type="color"
+                  value={customColor}
+                  onChange={(e) => {
+                    setCustomColor(e.target.value);
+                    setSelectedColor(e.target.value);
+                  }}
+                  className="w-14 h-14 rounded-full border-4 cursor-pointer transition transform hover:scale-110"
+                  style={{ 
+                    border: selectedColor === customColor ? '4px solid #1B5E20' : '4px solid white',
+                    boxShadow: selectedColor === customColor ? '0 0 0 4px rgba(46, 125, 50, 0.3)' : '0 4px 6px rgba(0,0,0,0.2)'
+                  }}
+                  title="Choose custom color"
+                />
+                <div 
+                  className="absolute -bottom-6 left-1/2 transform -translate-x-1/2 text-xs font-bold whitespace-nowrap"
+                  style={{ color: '#558B2F' }}
+                >
+                  Custom
+                </div>
+              </div>
             </div>
           </div>
 
