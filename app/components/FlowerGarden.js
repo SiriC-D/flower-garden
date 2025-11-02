@@ -44,18 +44,26 @@ export default function FlowerGarden() {
     }
   };
 
-  // Helper to get coordinates from either Mouse or Touch event
+  // Helper to get coordinates from either Mouse or Touch event, accounting for canvas scaling
   const getCoords = (e) => {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
     
-    // Determine if it's a TouchEvent (e.touches exists) or a MouseEvent
+    // Determine if it's a TouchEvent or a MouseEvent
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
 
-    // Calculate coordinates relative to the canvas
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
+    // 1. Calculate the position relative to the *visual* canvas element
+    const xVisual = clientX - rect.left;
+    const yVisual = clientY - rect.top;
+
+    // 2. Calculate the scaling factor (Internal Drawing Width / Visual CSS Width)
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    // 3. Apply the scaling factor to get the correct coordinate for the 450x450 drawing buffer
+    const x = xVisual * scaleX;
+    const y = yVisual * scaleY;
     
     return { x, y };
   };
@@ -74,7 +82,7 @@ export default function FlowerGarden() {
     
     setIsDrawing(true);
     
-    // Use the already calculated, canvas-relative coordinates
+    // Start a new path and move to the initial point
     ctx.beginPath();
     ctx.moveTo(x, y);
   };
@@ -88,9 +96,13 @@ export default function FlowerGarden() {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     
-    // Use the already calculated, canvas-relative coordinates
+    // Draw the line from the current position to the new coordinate
     ctx.lineTo(x, y);
     ctx.stroke();
+    
+    // CRUCIAL: Immediately move the starting point of the path to the current position (x, y).
+    // This makes the drawing continuous and smooth on touch devices.
+    ctx.moveTo(x, y);
   };
 
   const stopDrawing = () => setIsDrawing(false);
@@ -132,20 +144,20 @@ export default function FlowerGarden() {
 
   // ---- Mobile touch handler wrappers ----
   const handleTouchStart = (e) => {
-    // Prevent scrolling/zooming while drawing
+    // Prevent default touch actions (like scrolling or zooming)
     e.preventDefault(); 
-    // Pass the original TouchEvent object to the unified function
+    // Pass the original TouchEvent object
     startDrawing(e);
   };
 
   const handleTouchMove = (e) => {
     e.preventDefault();
-    // Pass the original TouchEvent object to the unified function
+    // Pass the original TouchEvent object
     draw(e);
   };
 
   const handleTouchEnd = stopDrawing; 
-  // -------------------------------------
+  // -----------------------------
 
   if (showGallery) {
     return (
@@ -170,7 +182,7 @@ export default function FlowerGarden() {
             
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
               {flowers.map((flower) => (
-                <div key={flower.id} className="bg-white rounded-2xl p-3 shadow-lg transform hover:scale-105 transition" style={{ border: '3px solid #AED581' }}>
+                <div key={flower.id} className="bg-white rounded-2xl p-3 shadow-lg transform hover:scale-110 transition" style={{ border: '3px solid #AED581' }}>
                   <img src={flower.image} alt="Community flower" className="w-full h-32 object-contain" />
                   <p className="text-sm text-center mt-2" style={{ color: '#689F38' }}>
                     {new Date(flower.timestamp).toLocaleDateString()}
