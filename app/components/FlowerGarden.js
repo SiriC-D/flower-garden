@@ -45,7 +45,7 @@ export default function FlowerGarden() {
     const y = yVisual * scaleY;
     
     return { x, y };
-  }, []); // Dependencies: None, as canvasRef.current is accessed inside
+  }, []);
 
   const startDrawing = useCallback((e) => {
     // Use the helper to get the correct coordinates
@@ -70,7 +70,8 @@ export default function FlowerGarden() {
   const stopDrawing = useCallback(() => setIsDrawing(false), []);
 
   const draw = useCallback((e) => {
-    // We check isDrawing later to ensure draw can be used as a general handler
+    // Only draw if we are in a drawing state
+    if (!isDrawing) return;
     
     // Use the helper to get the correct coordinates
     const { x, y } = getCoords(e);
@@ -78,9 +79,6 @@ export default function FlowerGarden() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-
-    // Only draw if we are in a drawing state
-    if (!isDrawing) return;
     
     // Draw the line from the current position to the new coordinate
     ctx.lineTo(x, y);
@@ -93,8 +91,6 @@ export default function FlowerGarden() {
 
   // --- Event Handlers for Imperative Attachment ---
 
-  // NOTE: These handlers are simplified now because the startDrawing/draw functions
-  // already contain the coordinate logic. They primarily focus on preventing defaults.
   const handleTouchStart = useCallback((e) => {
     e.preventDefault(); 
     startDrawing(e);
@@ -105,7 +101,10 @@ export default function FlowerGarden() {
     draw(e);
   }, [draw]);
 
-  const handleTouchEnd = stopDrawing; 
+  const handleTouchEnd = useCallback((e) => {
+    e.preventDefault();
+    stopDrawing();
+  }, [stopDrawing]);
   
 
   // --- useEffect to Attach Non-Passive Touch Listeners ---
@@ -120,13 +119,13 @@ export default function FlowerGarden() {
 
     // Cleanup function to remove event listeners when the component unmounts
     return () => {
-      canvas.removeEventListener('touchstart', handleTouchStart, { passive: false });
-      canvas.removeEventListener('touchmove', handleTouchMove, { passive: false });
-      canvas.removeEventListener('touchend', handleTouchEnd, { passive: false });
+      canvas.removeEventListener('touchstart', handleTouchStart);
+      canvas.removeEventListener('touchmove', handleTouchMove);
+      canvas.removeEventListener('touchend', handleTouchEnd);
     };
-  }, [handleTouchStart, handleTouchMove, handleTouchEnd]); // Dependencies ensure handlers are current
+  }, [handleTouchStart, handleTouchMove, handleTouchEnd]);
 
-  // --- Other Component Logic (Unchanged) ---
+  // --- Other Component Logic ---
   
   useEffect(() => {
     loadFlowers();
@@ -151,7 +150,6 @@ export default function FlowerGarden() {
       console.error('Failed to save flowers:', error);
     }
   };
-
 
   const clearCanvas = () => {
     const canvas = canvasRef.current;
@@ -188,7 +186,7 @@ export default function FlowerGarden() {
     clearCanvas();
   };
 
-  // --- Render Logic (Canvas Updated) ---
+  // --- Render Logic ---
 
   if (showGallery) {
     return (
@@ -295,7 +293,7 @@ export default function FlowerGarden() {
               width={450}
               height={450}
               className="w-full cursor-crosshair rounded-2xl"
-              // Removed onTouchStart/Move/End props here
+              style={{ touchAction: 'none' }}
               onMouseDown={startDrawing}
               onMouseMove={draw}
               onMouseUp={stopDrawing}
