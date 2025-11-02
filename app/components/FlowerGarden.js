@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Leaf, Image, RotateCcw } from 'lucide-react';
 
 const COLORS = [
@@ -20,6 +20,114 @@ export default function FlowerGarden() {
   const canvasRef = useRef(null);
   const [loading, setLoading] = useState(true);
 
+  // --- Core Utility Functions (Memoized for use in useEffect) ---
+
+  // Helper to get coordinates, accounting for canvas scaling
+  const getCoords = useCallback((e) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    
+    // Determine if it's a TouchEvent or a MouseEvent
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+    // Calculate the position relative to the *visual* canvas element
+    const xVisual = clientX - rect.left;
+    const yVisual = clientY - rect.top;
+
+    // Calculate the scaling factor (Internal Drawing Width / Visual CSS Width)
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    // Apply the scaling factor to get the correct coordinate for the 450x450 drawing buffer
+    const x = xVisual * scaleX;
+    const y = yVisual * scaleY;
+    
+    return { x, y };
+  }, []); // Dependencies: None, as canvasRef.current is accessed inside
+
+  const startDrawing = useCallback((e) => {
+    // Use the helper to get the correct coordinates
+    const { x, y } = getCoords(e);
+    
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    
+    ctx.strokeStyle = selectedColor;
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    
+    setIsDrawing(true);
+    
+    // Start a new path and move to the initial point
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  }, [getCoords, selectedColor]);
+
+  const stopDrawing = useCallback(() => setIsDrawing(false), []);
+
+  const draw = useCallback((e) => {
+    // We check isDrawing later to ensure draw can be used as a general handler
+    
+    // Use the helper to get the correct coordinates
+    const { x, y } = getCoords(e);
+    
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+
+    // Only draw if we are in a drawing state
+    if (!isDrawing) return;
+    
+    // Draw the line from the current position to the new coordinate
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    
+    // CRUCIAL: Move the starting point of the path to the current position (x, y)
+    ctx.moveTo(x, y);
+  }, [getCoords, isDrawing]);
+
+
+  // --- Event Handlers for Imperative Attachment ---
+
+  // NOTE: These handlers are simplified now because the startDrawing/draw functions
+  // already contain the coordinate logic. They primarily focus on preventing defaults.
+  const handleTouchStart = useCallback((e) => {
+    e.preventDefault(); 
+    startDrawing(e);
+  }, [startDrawing]);
+
+  const handleTouchMove = useCallback((e) => {
+    e.preventDefault();
+    draw(e);
+  }, [draw]);
+
+  const handleTouchEnd = stopDrawing; 
+  
+
+  // --- useEffect to Attach Non-Passive Touch Listeners ---
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    // Attach listeners with { passive: false } to reliably prevent default browser behavior
+    canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+    canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+
+    // Cleanup function to remove event listeners when the component unmounts
+    return () => {
+      canvas.removeEventListener('touchstart', handleTouchStart, { passive: false });
+      canvas.removeEventListener('touchmove', handleTouchMove, { passive: false });
+      canvas.removeEventListener('touchend', handleTouchEnd, { passive: false });
+    };
+  }, [handleTouchStart, handleTouchMove, handleTouchEnd]); // Dependencies ensure handlers are current
+
+  // --- Other Component Logic (Unchanged) ---
+  
   useEffect(() => {
     loadFlowers();
   }, []);
@@ -43,90 +151,6 @@ export default function FlowerGarden() {
       console.error('Failed to save flowers:', error);
     }
   };
-
-  // ------------------------------------------------------------------
-  // CORE DRAWING LOGIC (Mobile/Desktop Unified)
-  // ------------------------------------------------------------------
-  
-  // Helper to get coordinates from either Mouse or Touch event, accounting for canvas scaling
-  const getCoords = (e) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    
-    const rect = canvas.getBoundingClientRect();
-    
-    // Step 1: Get raw client coordinates (handles both MouseEvent and TouchEvent)
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-
-    // Step 2: Calculate position relative to the top-left of the visible canvas rectangle
-    const xVisual = clientX - rect.left;
-    const yVisual = clientY - rect.top;
-
-    // Step 3: Calculate the scale factor (Internal resolution / Visual size).
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-
-    // Step 4: Apply the scale factor to map the visual position to the internal drawing buffer.
-    const x = xVisual * scaleX;
-    const y = yVisual * scaleY;
-    
-    return { x, y };
-  };
-
-  const startDrawing = (e) => {
-    const { x, y } = getCoords(e);
-    
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    
-    ctx.strokeStyle = selectedColor;
-    ctx.lineWidth = 4;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    
-    setIsDrawing(true);
-    
-    // Start a new path and move to the initial point
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-  };
-
-  const draw = (e) => {
-    if (!isDrawing) return;
-    
-    const { x, y } = getCoords(e);
-    
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    
-    // Draw the line from the current position to the new coordinate
-    ctx.lineTo(x, y);
-    ctx.stroke();
-    
-    // CRUCIAL: Immediately move the starting point of the path to the current position (x, y).
-    // This makes the drawing continuous and smooth on touch devices.
-    ctx.moveTo(x, y);
-  };
-
-  const stopDrawing = () => setIsDrawing(false);
-
-  // ---- Mobile touch handler wrappers ----
-  const handleTouchStart = (e) => {
-    // Prevent default touch actions (like scrolling or zooming)
-    e.preventDefault(); 
-    // Pass the original TouchEvent object
-    startDrawing(e);
-  };
-
-  const handleTouchMove = (e) => {
-    e.preventDefault();
-    // Pass the original TouchEvent object
-    draw(e);
-  };
-
-  const handleTouchEnd = stopDrawing; 
-  // ------------------------------------------------------------------
 
 
   const clearCanvas = () => {
@@ -163,6 +187,8 @@ export default function FlowerGarden() {
     setTimeout(() => setMessage(''), 2000);
     clearCanvas();
   };
+
+  // --- Render Logic (Canvas Updated) ---
 
   if (showGallery) {
     return (
@@ -269,13 +295,11 @@ export default function FlowerGarden() {
               width={450}
               height={450}
               className="w-full cursor-crosshair rounded-2xl"
+              // Removed onTouchStart/Move/End props here
               onMouseDown={startDrawing}
               onMouseMove={draw}
               onMouseUp={stopDrawing}
               onMouseLeave={stopDrawing}
-              onTouchStart={handleTouchStart}
-              onTouchMove={handleTouchMove}
-              onTouchEnd={handleTouchEnd}
             />
           </div>
 
