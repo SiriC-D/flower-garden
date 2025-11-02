@@ -44,24 +44,30 @@ export default function FlowerGarden() {
     }
   };
 
+  // ------------------------------------------------------------------
+  // CORE DRAWING LOGIC (Mobile/Desktop Unified)
+  // ------------------------------------------------------------------
+  
   // Helper to get coordinates from either Mouse or Touch event, accounting for canvas scaling
   const getCoords = (e) => {
     const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    
     const rect = canvas.getBoundingClientRect();
     
-    // Determine if it's a TouchEvent or a MouseEvent
+    // Step 1: Get raw client coordinates (handles both MouseEvent and TouchEvent)
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
 
-    // 1. Calculate the position relative to the *visual* canvas element
+    // Step 2: Calculate position relative to the top-left of the visible canvas rectangle
     const xVisual = clientX - rect.left;
     const yVisual = clientY - rect.top;
 
-    // 2. Calculate the scaling factor (Internal Drawing Width / Visual CSS Width)
+    // Step 3: Calculate the scale factor (Internal resolution / Visual size).
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
 
-    // 3. Apply the scaling factor to get the correct coordinate for the 450x450 drawing buffer
+    // Step 4: Apply the scale factor to map the visual position to the internal drawing buffer.
     const x = xVisual * scaleX;
     const y = yVisual * scaleY;
     
@@ -69,7 +75,6 @@ export default function FlowerGarden() {
   };
 
   const startDrawing = (e) => {
-    // Use the helper to get the correct coordinates for Mouse or Touch
     const { x, y } = getCoords(e);
     
     const canvas = canvasRef.current;
@@ -90,7 +95,6 @@ export default function FlowerGarden() {
   const draw = (e) => {
     if (!isDrawing) return;
     
-    // Use the helper to get the correct coordinates for Mouse or Touch
     const { x, y } = getCoords(e);
     
     const canvas = canvasRef.current;
@@ -106,6 +110,24 @@ export default function FlowerGarden() {
   };
 
   const stopDrawing = () => setIsDrawing(false);
+
+  // ---- Mobile touch handler wrappers ----
+  const handleTouchStart = (e) => {
+    // Prevent default touch actions (like scrolling or zooming)
+    e.preventDefault(); 
+    // Pass the original TouchEvent object
+    startDrawing(e);
+  };
+
+  const handleTouchMove = (e) => {
+    e.preventDefault();
+    // Pass the original TouchEvent object
+    draw(e);
+  };
+
+  const handleTouchEnd = stopDrawing; 
+  // ------------------------------------------------------------------
+
 
   const clearCanvas = () => {
     const canvas = canvasRef.current;
@@ -141,23 +163,6 @@ export default function FlowerGarden() {
     setTimeout(() => setMessage(''), 2000);
     clearCanvas();
   };
-
-  // ---- Mobile touch handler wrappers ----
-  const handleTouchStart = (e) => {
-    // Prevent default touch actions (like scrolling or zooming)
-    e.preventDefault(); 
-    // Pass the original TouchEvent object
-    startDrawing(e);
-  };
-
-  const handleTouchMove = (e) => {
-    e.preventDefault();
-    // Pass the original TouchEvent object
-    draw(e);
-  };
-
-  const handleTouchEnd = stopDrawing; 
-  // -----------------------------
 
   if (showGallery) {
     return (
