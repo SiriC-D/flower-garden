@@ -44,9 +44,27 @@ export default function FlowerGarden() {
     }
   };
 
-  const startDrawing = (e) => {
+  // Helper to get coordinates from either Mouse or Touch event
+  const getCoords = (e) => {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
+    
+    // Determine if it's a TouchEvent or a MouseEvent
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+    // Calculate coordinates relative to the canvas
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    
+    return { x, y };
+  };
+
+  const startDrawing = (e) => {
+    // Use the helper to get the correct coordinates for Mouse or Touch
+    const { x, y } = getCoords(e);
+    
+    const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     
     ctx.strokeStyle = selectedColor;
@@ -56,8 +74,7 @@ export default function FlowerGarden() {
     
     setIsDrawing(true);
     
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    // Use the already calculated, canvas-relative coordinates
     ctx.beginPath();
     ctx.moveTo(x, y);
   };
@@ -65,12 +82,13 @@ export default function FlowerGarden() {
   const draw = (e) => {
     if (!isDrawing) return;
     
+    // Use the helper to get the correct coordinates for Mouse or Touch
+    const { x, y } = getCoords(e);
+    
     const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
     const ctx = canvas.getContext('2d');
     
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    // Use the already calculated, canvas-relative coordinates
     ctx.lineTo(x, y);
     ctx.stroke();
   };
@@ -112,34 +130,21 @@ export default function FlowerGarden() {
     clearCanvas();
   };
 
-  // ---- Mobile touch fixes ----
-  const getTouchPos = (touch) => {
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: touch.clientX - rect.left,
-      y: touch.clientY - rect.top
-    };
-  };
-
+  // ---- Mobile touch handler wrappers (Pass event directly to unified functions) ----
   const handleTouchStart = (e) => {
-    e.preventDefault();
-    const touch = e.touches[0];
-    const pos = getTouchPos(touch);
-    startDrawing({ clientX: pos.x + canvasRef.current.getBoundingClientRect().left, clientY: pos.y + canvasRef.current.getBoundingClientRect().top });
+    // Prevent scrolling/zooming while drawing
+    e.preventDefault(); 
+    // Pass the original TouchEvent object
+    startDrawing(e);
   };
 
   const handleTouchMove = (e) => {
     e.preventDefault();
-    const touch = e.touches[0];
-    const pos = getTouchPos(touch);
-    draw({ clientX: pos.x + canvasRef.current.getBoundingClientRect().left, clientY: pos.y + canvasRef.current.getBoundingClientRect().top });
+    // Pass the original TouchEvent object
+    draw(e);
   };
 
-  const handleTouchEnd = (e) => {
-    e.preventDefault();
-    stopDrawing();
-  };
+  const handleTouchEnd = stopDrawing; 
   // -----------------------------
 
   if (showGallery) {
