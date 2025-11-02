@@ -27,9 +27,7 @@ export default function FlowerGarden() {
   const loadFlowers = async () => {
     try {
       const value = localStorage.getItem('garden_flowers');
-      if (value) {
-        setFlowers(JSON.parse(value));
-      }
+      if (value) setFlowers(JSON.parse(value));
     } catch (error) {
       console.log('No flowers yet, starting fresh garden');
       setFlowers([]);
@@ -46,41 +44,33 @@ export default function FlowerGarden() {
     }
   };
 
-  // Convert mouse/touch coords to canvas coords
-  const getCanvasCoordinates = (clientX, clientY) => {
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-
-    return {
-      x: (clientX - rect.left) * scaleX,
-      y: (clientY - rect.top) * scaleY
-    };
-  };
-
   const startDrawing = (e) => {
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-
+    const rect = canvas.getBoundingClientRect();
+    const ctx = canvas.getContext('2d');
+    
     ctx.strokeStyle = selectedColor;
     ctx.lineWidth = 4;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    
     setIsDrawing(true);
-
-    const { x, y } = getCanvasCoordinates(e.clientX, e.clientY);
+    
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
     ctx.beginPath();
     ctx.moveTo(x, y);
   };
 
   const draw = (e) => {
     if (!isDrawing) return;
+    
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-
-    const { x, y } = getCanvasCoordinates(e.clientX, e.clientY);
+    const rect = canvas.getBoundingClientRect();
+    const ctx = canvas.getContext('2d');
+    
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
     ctx.lineTo(x, y);
     ctx.stroke();
   };
@@ -89,65 +79,106 @@ export default function FlowerGarden() {
 
   const clearCanvas = () => {
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     setMessage('');
   };
 
   const plantFlower = async () => {
     const canvas = canvasRef.current;
+    const imageData = canvas.toDataURL('image/png');
     const ctx = canvas.getContext('2d');
     const pixelData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const isEmpty = !pixelData.data.some(channel => channel !== 0);
-
+    
     if (isEmpty) {
       setMessage('Draw something first! 🎨');
       setTimeout(() => setMessage(''), 2000);
       return;
     }
 
-    const imageData = canvas.toDataURL('image/png');
     const newFlower = {
       id: Date.now(),
       image: imageData,
       timestamp: new Date().toISOString()
     };
-
+    
     const updatedFlowers = [newFlower, ...flowers];
     setFlowers(updatedFlowers);
     await saveFlowers(updatedFlowers);
-
+    
     setMessage('🌸 Planted! 🌸');
     setTimeout(() => setMessage(''), 2000);
     clearCanvas();
   };
 
+  // ---- Mobile touch fixes ----
+  const getTouchPos = (touch) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: touch.clientX - rect.left,
+      y: touch.clientY - rect.top
+    };
+  };
+
+  const handleTouchStart = (e) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const pos = getTouchPos(touch);
+    startDrawing({ clientX: pos.x + canvasRef.current.getBoundingClientRect().left, clientY: pos.y + canvasRef.current.getBoundingClientRect().top });
+  };
+
+  const handleTouchMove = (e) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const pos = getTouchPos(touch);
+    draw({ clientX: pos.x + canvasRef.current.getBoundingClientRect().left, clientY: pos.y + canvasRef.current.getBoundingClientRect().top });
+  };
+
+  const handleTouchEnd = (e) => {
+    e.preventDefault();
+    stopDrawing();
+  };
+  // -----------------------------
+
   if (showGallery) {
     return (
-      <div className="min-h-screen p-4" style={{ background: 'linear-gradient(to bottom, #F0F4C3, #C5E1A5)', fontFamily: '"Comic Sans MS", "Chalkboard SE", "Comic Neue", cursive' }}>
+      <div className="min-h-screen p-4" style={{ 
+        background: 'linear-gradient(to bottom, #F0F4C3, #C5E1A5)',
+        fontFamily: '"Comic Sans MS", "Chalkboard SE", "Comic Neue", cursive'
+      }}>
         <div className="max-w-5xl mx-auto">
           <div className="bg-white rounded-3xl shadow-2xl p-8" style={{ border: '4px solid #81C784' }}>
             <div className="flex items-center justify-between mb-8">
-              <h2 className="text-5xl font-bold" style={{ color: '#2E7D32', textShadow: '3px 3px 0px #A5D6A7' }}>
-                Flower Gallery
-              </h2>
-              <button onClick={() => setShowGallery(false)} className="px-6 py-3 text-white rounded-full text-xl font-bold shadow-lg transform hover:scale-105 transition" style={{ background: 'linear-gradient(135deg, #66BB6A, #43A047)', border: '3px solid #2E7D32' }}>
+              <h2 className="text-5xl font-bold" style={{ color: '#2E7D32', textShadow: '3px 3px 0px #A5D6A7' }}>Flower Gallery</h2>
+              <button
+                onClick={() => setShowGallery(false)}
+                className="px-6 py-3 text-white rounded-full text-xl font-bold shadow-lg transform hover:scale-105 transition"
+                style={{ background: 'linear-gradient(135deg, #66BB6A, #43A047)', border: '3px solid #2E7D32' }}
+              >
                 ← Back to Garden
               </button>
             </div>
-
+            
             <p className="text-2xl mb-6" style={{ color: '#558B2F' }}>{flowers.length} total flowers 🌺</p>
-
+            
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-              {flowers.map(flower => (
+              {flowers.map((flower) => (
                 <div key={flower.id} className="bg-white rounded-2xl p-3 shadow-lg transform hover:scale-105 transition" style={{ border: '3px solid #AED581' }}>
                   <img src={flower.image} alt="Community flower" className="w-full h-32 object-contain" />
-                  <p className="text-sm text-center mt-2" style={{ color: '#689F38' }}>{new Date(flower.timestamp).toLocaleDateString()}</p>
+                  <p className="text-sm text-center mt-2" style={{ color: '#689F38' }}>
+                    {new Date(flower.timestamp).toLocaleDateString()}
+                  </p>
                 </div>
               ))}
             </div>
-
-            {flowers.length === 0 && <div className="text-center py-16 text-3xl" style={{ color: '#7CB342' }}>No flowers yet! 🌱<br />Be the first to plant one!</div>}
+            
+            {flowers.length === 0 && (
+              <div className="text-center py-16 text-3xl" style={{ color: '#7CB342' }}>
+                No flowers yet! 🌱<br/>Be the first to plant one!
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -159,7 +190,9 @@ export default function FlowerGarden() {
       <div className="max-w-5xl mx-auto">
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-6xl font-bold mb-3" style={{ color: '#2E7D32', textShadow: '4px 4px 0px #A5D6A7', letterSpacing: '2px' }}>Flower Gallery</h1>
+          <h1 className="text-6xl font-bold mb-3" style={{ color: '#2E7D32', textShadow: '4px 4px 0px #A5D6A7', letterSpacing: '2px' }}>
+            Flower Gallery
+          </h1>
           <p className="text-2xl" style={{ color: '#558B2F' }}>{flowers.length} total flowers</p>
         </div>
 
@@ -169,18 +202,20 @@ export default function FlowerGarden() {
             <div className="absolute inset-0 opacity-30">
               <div className="h-full w-full" style={{ backgroundImage: `repeating-linear-gradient(90deg, transparent, transparent 8px, rgba(139, 195, 74, 0.3) 8px, rgba(139, 195, 74, 0.3) 10px)` }}></div>
             </div>
-
+            
             <div className="relative grid grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-6 justify-items-center">
-              {loading ? <div className="col-span-full text-center text-white text-2xl">Loading garden... 🌱</div> :
-                flowers.slice(0, 30).map((flower, idx) => (
-                  <div key={flower.id} className="transform hover:scale-110 transition" style={{ animation: `float ${2 + (idx % 3)}s ease-in-out infinite`, animationDelay: `${idx * 0.1}s` }}>
-                    <img src={flower.image} alt="Planted flower" className="w-full h-24 object-contain" style={{ filter: 'drop-shadow(2px 2px 4px rgba(0,0,0,0.3))' }} />
-                  </div>
-                ))}
-              {!loading && flowers.length === 0 && <div className="text-center text-white text-3xl font-bold">The garden is waiting! 🌱<br />Plant the first flower!</div>}
+              {loading ? (
+                <div className="col-span-full text-center text-white text-2xl">Loading garden... 🌱</div>
+              ) : flowers.slice(0, 30).map((flower, idx) => (
+                <div key={flower.id} className="transform hover:scale-110 transition" style={{ animation: `float ${2 + (idx % 3)}s ease-in-out infinite`, animationDelay: `${idx * 0.1}s` }}>
+                  <img src={flower.image} alt="Planted flower" className="w-full h-24 object-contain" style={{ filter: 'drop-shadow(2px 2px 4px rgba(0,0,0,0.3))' }} />
+                </div>
+              ))}
             </div>
+            
+            {!loading && flowers.length === 0 && <div className="text-center text-white text-3xl font-bold">The garden is waiting! 🌱<br/>Plant the first flower!</div>}
           </div>
-
+          
           <div className="mt-6 text-center">
             <button onClick={() => setShowGallery(true)} className="inline-flex items-center gap-3 px-8 py-4 text-white rounded-full text-2xl font-bold shadow-lg transform hover:scale-105 transition" style={{ background: 'linear-gradient(135deg, #66BB6A, #43A047)', border: '3px solid #2E7D32' }}>
               <Image size={28} />
@@ -192,11 +227,16 @@ export default function FlowerGarden() {
         {/* Drawing Area */}
         <div className="bg-white rounded-3xl shadow-2xl p-8" style={{ border: '4px solid #81C784' }}>
           <h3 className="text-4xl font-bold mb-6 text-center" style={{ color: '#2E7D32', textShadow: '2px 2px 0px #A5D6A7' }}>Add flowers to our garden?</h3>
-
+          
           {/* Color Palette */}
           <div className="flex gap-4 mb-6 justify-center flex-wrap">
-            {COLORS.map(color => (
-              <button key={color} onClick={() => setSelectedColor(color)} className={`w-16 h-16 rounded-full border-4 transition transform hover:scale-110 ${selectedColor === color ? 'scale-125 border-gray-800' : 'border-white'}`} style={{ backgroundColor: color, boxShadow: selectedColor === color ? '0 0 0 4px rgba(46, 125, 50, 0.3)' : '0 4px 6px rgba(0,0,0,0.2)' }} />
+            {COLORS.map((color) => (
+              <button
+                key={color}
+                onClick={() => setSelectedColor(color)}
+                className={`w-16 h-16 rounded-full border-4 transition transform hover:scale-110 ${selectedColor === color ? 'scale-125 border-gray-800' : 'border-white'}`}
+                style={{ backgroundColor: color, boxShadow: selectedColor === color ? '0 0 0 4px rgba(46, 125, 50, 0.3)' : '0 4px 6px rgba(0,0,0,0.2)' }}
+              />
             ))}
           </div>
 
@@ -211,20 +251,9 @@ export default function FlowerGarden() {
               onMouseMove={draw}
               onMouseUp={stopDrawing}
               onMouseLeave={stopDrawing}
-              onTouchStart={(e) => {
-                e.preventDefault();
-                const touch = e.touches[0];
-                startDrawing({ clientX: touch.clientX, clientY: touch.clientY });
-              }}
-              onTouchMove={(e) => {
-                e.preventDefault();
-                const touch = e.touches[0];
-                draw({ clientX: touch.clientX, clientY: touch.clientY });
-              }}
-              onTouchEnd={(e) => {
-                e.preventDefault();
-                stopDrawing();
-              }}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
             />
           </div>
 
@@ -237,7 +266,7 @@ export default function FlowerGarden() {
               <RotateCcw size={24} />
               Clear
             </button>
-
+            
             <button onClick={plantFlower} className="inline-flex items-center gap-3 px-8 py-3 text-white rounded-full text-2xl font-bold shadow-lg transform hover:scale-105 transition" style={{ background: 'linear-gradient(135deg, #66BB6A, #43A047)', border: '3px solid #2E7D32' }}>
               <Leaf size={28} />
               Plant
