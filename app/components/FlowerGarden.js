@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Leaf, Image, RotateCcw } from 'lucide-react';
+import { Leaf, Image, RotateCcw, Sparkles, Circle, Droplet } from 'lucide-react';
 
 const COLORS = [
   '#E91E63', // Pink
@@ -11,44 +11,102 @@ const COLORS = [
   '#2E7D32', // Green
 ];
 
+const BRUSH_TYPES = {
+  NORMAL: 'normal',
+  GLOW: 'glow',
+  SPRAY: 'spray',
+  FLOWER: 'flower'
+};
+
+const THICKNESS_OPTIONS = [2, 4, 8, 12];
+
 export default function FlowerGarden() {
   const [flowers, setFlowers] = useState([]);
   const [isDrawing, setIsDrawing] = useState(false);
   const [selectedColor, setSelectedColor] = useState(COLORS[0]);
+  const [brushType, setBrushType] = useState(BRUSH_TYPES.NORMAL);
+  const [thickness, setThickness] = useState(4);
   const [showGallery, setShowGallery] = useState(false);
   const [message, setMessage] = useState('');
   const canvasRef = useRef(null);
   const [loading, setLoading] = useState(true);
 
-  // --- Core Utility Functions (Memoized for use in useEffect) ---
+  // --- Core Utility Functions ---
 
-  // Helper to get coordinates, accounting for canvas scaling
   const getCoords = useCallback((e) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
     
-    // Determine if it's a TouchEvent or a MouseEvent
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
 
-    // Calculate the position relative to the *visual* canvas element
     const xVisual = clientX - rect.left;
     const yVisual = clientY - rect.top;
 
-    // Calculate the scaling factor (Internal Drawing Width / Visual CSS Width)
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
 
-    // Apply the scaling factor to get the correct coordinate for the 450x450 drawing buffer
     const x = xVisual * scaleX;
     const y = yVisual * scaleY;
     
     return { x, y };
   }, []);
 
+  const drawGlow = useCallback((ctx, x, y) => {
+    const gradient = ctx.createRadialGradient(x, y, 0, x, y, thickness * 2);
+    gradient.addColorStop(0, selectedColor);
+    gradient.addColorStop(0.5, selectedColor + '80');
+    gradient.addColorStop(1, selectedColor + '00');
+    
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(x, y, thickness * 2, 0, Math.PI * 2);
+    ctx.fill();
+  }, [selectedColor, thickness]);
+
+  const drawSpray = useCallback((ctx, x, y) => {
+    const numDots = 15;
+    const radius = thickness * 2;
+    
+    for (let i = 0; i < numDots; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const distance = Math.random() * radius;
+      const dotX = x + Math.cos(angle) * distance;
+      const dotY = y + Math.sin(angle) * distance;
+      const dotSize = Math.random() * 2 + 1;
+      
+      ctx.fillStyle = selectedColor;
+      ctx.beginPath();
+      ctx.arc(dotX, dotY, dotSize, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }, [selectedColor, thickness]);
+
+  const drawFlower = useCallback((ctx, x, y) => {
+    const petalCount = 5;
+    const petalSize = thickness * 1.5;
+    
+    // Draw petals
+    for (let i = 0; i < petalCount; i++) {
+      const angle = (i / petalCount) * Math.PI * 2;
+      const petalX = x + Math.cos(angle) * petalSize;
+      const petalY = y + Math.sin(angle) * petalSize;
+      
+      ctx.fillStyle = selectedColor;
+      ctx.beginPath();
+      ctx.arc(petalX, petalY, petalSize * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    
+    // Draw center
+    ctx.fillStyle = '#FFEB3B';
+    ctx.beginPath();
+    ctx.arc(x, y, petalSize * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+  }, [selectedColor, thickness]);
+
   const startDrawing = useCallback((e) => {
-    // Use the helper to get the correct coordinates
     const { x, y } = getCoords(e);
     
     const canvas = canvasRef.current;
@@ -56,40 +114,50 @@ export default function FlowerGarden() {
     const ctx = canvas.getContext('2d');
     
     ctx.strokeStyle = selectedColor;
-    ctx.lineWidth = 4;
+    ctx.lineWidth = thickness;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     
     setIsDrawing(true);
     
-    // Start a new path and move to the initial point
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-  }, [getCoords, selectedColor]);
+    // Draw initial point based on brush type
+    if (brushType === BRUSH_TYPES.GLOW) {
+      drawGlow(ctx, x, y);
+    } else if (brushType === BRUSH_TYPES.SPRAY) {
+      drawSpray(ctx, x, y);
+    } else if (brushType === BRUSH_TYPES.FLOWER) {
+      drawFlower(ctx, x, y);
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+    }
+  }, [getCoords, selectedColor, thickness, brushType, drawGlow, drawSpray, drawFlower]);
 
   const stopDrawing = useCallback(() => setIsDrawing(false), []);
 
   const draw = useCallback((e) => {
-    // Only draw if we are in a drawing state
     if (!isDrawing) return;
     
-    // Use the helper to get the correct coordinates
     const { x, y } = getCoords(e);
     
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     
-    // Draw the line from the current position to the new coordinate
-    ctx.lineTo(x, y);
-    ctx.stroke();
-    
-    // CRUCIAL: Move the starting point of the path to the current position (x, y)
-    ctx.moveTo(x, y);
-  }, [getCoords, isDrawing]);
+    if (brushType === BRUSH_TYPES.GLOW) {
+      drawGlow(ctx, x, y);
+    } else if (brushType === BRUSH_TYPES.SPRAY) {
+      drawSpray(ctx, x, y);
+    } else if (brushType === BRUSH_TYPES.FLOWER) {
+      drawFlower(ctx, x, y);
+    } else {
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      ctx.moveTo(x, y);
+    }
+  }, [getCoords, isDrawing, brushType, drawGlow, drawSpray, drawFlower]);
 
-
-  // --- Event Handlers for Imperative Attachment ---
+  // --- Event Handlers for Touch ---
 
   const handleTouchStart = useCallback((e) => {
     e.preventDefault(); 
@@ -105,19 +173,16 @@ export default function FlowerGarden() {
     e.preventDefault();
     stopDrawing();
   }, [stopDrawing]);
-  
 
-  // --- useEffect to Attach Non-Passive Touch Listeners ---
+  // --- useEffect to Attach Touch Listeners ---
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // Attach listeners with { passive: false } to reliably prevent default browser behavior
     canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
     canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
     canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
 
-    // Cleanup function to remove event listeners when the component unmounts
     return () => {
       canvas.removeEventListener('touchstart', handleTouchStart);
       canvas.removeEventListener('touchmove', handleTouchMove);
@@ -125,7 +190,7 @@ export default function FlowerGarden() {
     };
   }, [handleTouchStart, handleTouchMove, handleTouchEnd]);
 
-  // --- Other Component Logic ---
+  // --- Storage Functions ---
   
   useEffect(() => {
     loadFlowers();
@@ -275,15 +340,100 @@ export default function FlowerGarden() {
           <h3 className="text-4xl font-bold mb-6 text-center" style={{ color: '#2E7D32', textShadow: '2px 2px 0px #A5D6A7' }}>Add flowers to our garden?</h3>
           
           {/* Color Palette */}
-          <div className="flex gap-4 mb-6 justify-center flex-wrap">
-            {COLORS.map((color) => (
+          <div className="mb-6">
+            <p className="text-lg font-bold mb-3 text-center" style={{ color: '#558B2F' }}>Colors</p>
+            <div className="flex gap-4 justify-center flex-wrap">
+              {COLORS.map((color) => (
+                <button
+                  key={color}
+                  onClick={() => setSelectedColor(color)}
+                  className={`w-14 h-14 rounded-full border-4 transition transform hover:scale-110 ${selectedColor === color ? 'scale-125 border-gray-800' : 'border-white'}`}
+                  style={{ backgroundColor: color, boxShadow: selectedColor === color ? '0 0 0 4px rgba(46, 125, 50, 0.3)' : '0 4px 6px rgba(0,0,0,0.2)' }}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Brush Type Selector */}
+          <div className="mb-6">
+            <p className="text-lg font-bold mb-3 text-center" style={{ color: '#558B2F' }}>Brush Type</p>
+            <div className="flex gap-3 justify-center flex-wrap">
               <button
-                key={color}
-                onClick={() => setSelectedColor(color)}
-                className={`w-16 h-16 rounded-full border-4 transition transform hover:scale-110 ${selectedColor === color ? 'scale-125 border-gray-800' : 'border-white'}`}
-                style={{ backgroundColor: color, boxShadow: selectedColor === color ? '0 0 0 4px rgba(46, 125, 50, 0.3)' : '0 4px 6px rgba(0,0,0,0.2)' }}
-              />
-            ))}
+                onClick={() => setBrushType(BRUSH_TYPES.NORMAL)}
+                className={`inline-flex items-center gap-2 px-5 py-3 rounded-full text-lg font-bold shadow-lg transform hover:scale-105 transition ${brushType === BRUSH_TYPES.NORMAL ? 'scale-110' : ''}`}
+                style={{ 
+                  background: brushType === BRUSH_TYPES.NORMAL ? 'linear-gradient(135deg, #66BB6A, #43A047)' : '#E8F5E9',
+                  color: brushType === BRUSH_TYPES.NORMAL ? 'white' : '#2E7D32',
+                  border: `3px solid ${brushType === BRUSH_TYPES.NORMAL ? '#2E7D32' : '#81C784'}`
+                }}
+              >
+                <Circle size={20} />
+                Normal
+              </button>
+              <button
+                onClick={() => setBrushType(BRUSH_TYPES.GLOW)}
+                className={`inline-flex items-center gap-2 px-5 py-3 rounded-full text-lg font-bold shadow-lg transform hover:scale-105 transition ${brushType === BRUSH_TYPES.GLOW ? 'scale-110' : ''}`}
+                style={{ 
+                  background: brushType === BRUSH_TYPES.GLOW ? 'linear-gradient(135deg, #66BB6A, #43A047)' : '#E8F5E9',
+                  color: brushType === BRUSH_TYPES.GLOW ? 'white' : '#2E7D32',
+                  border: `3px solid ${brushType === BRUSH_TYPES.GLOW ? '#2E7D32' : '#81C784'}`
+                }}
+              >
+                <Sparkles size={20} />
+                Glow
+              </button>
+              <button
+                onClick={() => setBrushType(BRUSH_TYPES.SPRAY)}
+                className={`inline-flex items-center gap-2 px-5 py-3 rounded-full text-lg font-bold shadow-lg transform hover:scale-105 transition ${brushType === BRUSH_TYPES.SPRAY ? 'scale-110' : ''}`}
+                style={{ 
+                  background: brushType === BRUSH_TYPES.SPRAY ? 'linear-gradient(135deg, #66BB6A, #43A047)' : '#E8F5E9',
+                  color: brushType === BRUSH_TYPES.SPRAY ? 'white' : '#2E7D32',
+                  border: `3px solid ${brushType === BRUSH_TYPES.SPRAY ? '#2E7D32' : '#81C784'}`
+                }}
+              >
+                <Droplet size={20} />
+                Spray
+              </button>
+              <button
+                onClick={() => setBrushType(BRUSH_TYPES.FLOWER)}
+                className={`inline-flex items-center gap-2 px-5 py-3 rounded-full text-lg font-bold shadow-lg transform hover:scale-105 transition ${brushType === BRUSH_TYPES.FLOWER ? 'scale-110' : ''}`}
+                style={{ 
+                  background: brushType === BRUSH_TYPES.FLOWER ? 'linear-gradient(135deg, #66BB6A, #43A047)' : '#E8F5E9',
+                  color: brushType === BRUSH_TYPES.FLOWER ? 'white' : '#2E7D32',
+                  border: `3px solid ${brushType === BRUSH_TYPES.FLOWER ? '#2E7D32' : '#81C784'}`
+                }}
+              >
+                🌸
+                Flower
+              </button>
+            </div>
+          </div>
+
+          {/* Thickness Selector */}
+          <div className="mb-6">
+            <p className="text-lg font-bold mb-3 text-center" style={{ color: '#558B2F' }}>Thickness</p>
+            <div className="flex gap-3 justify-center flex-wrap">
+              {THICKNESS_OPTIONS.map((size) => (
+                <button
+                  key={size}
+                  onClick={() => setThickness(size)}
+                  className={`flex items-center justify-center w-14 h-14 rounded-full border-4 transition transform hover:scale-110 ${thickness === size ? 'scale-125 border-gray-800' : 'border-white'}`}
+                  style={{ 
+                    backgroundColor: thickness === size ? '#66BB6A' : '#E8F5E9',
+                    boxShadow: thickness === size ? '0 0 0 4px rgba(46, 125, 50, 0.3)' : '0 4px 6px rgba(0,0,0,0.2)'
+                  }}
+                >
+                  <div 
+                    className="rounded-full"
+                    style={{ 
+                      width: `${size * 2}px`, 
+                      height: `${size * 2}px`, 
+                      backgroundColor: thickness === size ? 'white' : '#2E7D32'
+                    }}
+                  />
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Canvas */}
