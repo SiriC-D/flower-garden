@@ -1,7 +1,14 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Leaf, Image, RotateCcw, Sparkles, Circle, Droplet } from 'lucide-react';
+import { Leaf, Image, RotateCcw, Sparkles, Circle, Droplet, RefreshCw } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js';
+
+// Initialize Supabase client
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+);
 
 const COLORS = [
   '#E91E63', // Pink
@@ -31,6 +38,7 @@ export default function FlowerGarden() {
   const [message, setMessage] = useState('');
   const canvasRef = useRef(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   // --- Core Utility Functions ---
 
@@ -191,7 +199,7 @@ export default function FlowerGarden() {
     };
   }, [handleTouchStart, handleTouchMove, handleTouchEnd]);
 
-  // --- Storage Functions ---
+  // --- Supabase Storage Functions ---
   
   useEffect(() => {
     loadFlowers();
@@ -199,22 +207,31 @@ export default function FlowerGarden() {
 
   const loadFlowers = async () => {
     try {
-      const value = localStorage.getItem('garden_flowers');
-      if (value) setFlowers(JSON.parse(value));
+      const { data, error } = await supabase
+        .from('flowers')
+        .select('*')
+        .order('timestamp', { ascending: false })
+        .limit(100); // Limit to 100 most recent flowers
+
+      if (error) throw error;
+      
+      setFlowers(data || []);
     } catch (error) {
-      console.log('No flowers yet, starting fresh garden');
+      console.error('Error loading flowers:', error);
+      setMessage('Failed to load flowers 😢');
+      setTimeout(() => setMessage(''), 3000);
       setFlowers([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const saveFlowers = async (newFlowers) => {
-    try {
-      localStorage.setItem('garden_flowers', JSON.stringify(newFlowers));
-    } catch (error) {
-      console.error('Failed to save flowers:', error);
-    }
+  const refreshGarden = async () => {
+    setRefreshing(true);
+    await loadFlowers();
+    setRefreshing(false);
+    setMessage('🌸 Garden refreshed! 🌸');
+    setTimeout(() => setMessage(''), 2000);
   };
 
   const clearCanvas = () => {
@@ -237,19 +254,30 @@ export default function FlowerGarden() {
       return;
     }
 
-    const newFlower = {
-      id: Date.now(),
-      image: imageData,
-      timestamp: new Date().toISOString()
-    };
-    
-    const updatedFlowers = [newFlower, ...flowers];
-    setFlowers(updatedFlowers);
-    await saveFlowers(updatedFlowers);
-    
-    setMessage('🌸 Planted! 🌸');
-    setTimeout(() => setMessage(''), 2000);
-    clearCanvas();
+    try {
+      const { data, error } = await supabase
+        .from('flowers')
+        .insert([
+          { 
+            image: imageData,
+            timestamp: new Date().toISOString()
+          }
+        ])
+        .select();
+
+      if (error) throw error;
+
+      // Add the new flower to the beginning of the array
+      setFlowers([data[0], ...flowers]);
+      
+      setMessage('🌸 Planted! 🌸');
+      setTimeout(() => setMessage(''), 2000);
+      clearCanvas();
+    } catch (error) {
+      console.error('Error planting flower:', error);
+      setMessage('Failed to plant flower 😢');
+      setTimeout(() => setMessage(''), 3000);
+    }
   };
 
   // --- Render Logic ---
@@ -328,8 +356,22 @@ export default function FlowerGarden() {
             {!loading && flowers.length === 0 && <div className="text-center text-white text-3xl font-bold">The garden is waiting! 🌱<br/>Plant the first flower!</div>}
           </div>
           
-          <div className="mt-6 text-center">
-            <button onClick={() => setShowGallery(true)} className="inline-flex items-center gap-3 px-8 py-4 text-white rounded-full text-2xl font-bold shadow-lg transform hover:scale-105 transition" style={{ background: 'linear-gradient(135deg, #66BB6A, #43A047)', border: '3px solid #2E7D32' }}>
+          <div className="mt-6 flex gap-4 justify-center flex-wrap">
+            <button 
+              onClick={refreshGarden} 
+              disabled={refreshing}
+              className="inline-flex items-center gap-3 px-6 py-3 text-white rounded-full text-xl font-bold shadow-lg transform hover:scale-105 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ background: 'linear-gradient(135deg, #42A5F5, #1E88E5)', border: '3px solid #1565C0' }}
+            >
+              <RefreshCw size={24} className={refreshing ? 'animate-spin' : ''} />
+              {refreshing ? 'Refreshing...' : 'Refresh Garden'}
+            </button>
+            
+            <button 
+              onClick={() => setShowGallery(true)} 
+              className="inline-flex items-center gap-3 px-8 py-4 text-white rounded-full text-2xl font-bold shadow-lg transform hover:scale-105 transition" 
+              style={{ background: 'linear-gradient(135deg, #66BB6A, #43A047)', border: '3px solid #2E7D32' }}
+            >
               <Image size={28} />
               See flower gallery
             </button>
@@ -338,7 +380,8 @@ export default function FlowerGarden() {
 
         {/* Drawing Area */}
         <div className="bg-white rounded-3xl shadow-2xl p-8" style={{ border: '4px solid #81C784' }}>
-          <h3 className="text-4xl font-bold mb-6 text-center" style={{ color: '#2E7D32', textShadow: '2px 2px 0px #A5D6A7' }}>Add flowers to our garden?</h3>
+          <h3 className="text-4xl font-bold mb-6 text-center" style={{ color: '#2E7D32', textShadow: '2px 2px 0px #A5D6A7' }}>Add flowers to our shared garden!</h3>
+          <p className="text-center text-lg mb-6" style={{ color: '#558B2F' }}>🌍 All flowers you plant will be visible to everyone! 🌍</p>
           
           {/* Color Palette */}
           <div className="mb-6">
