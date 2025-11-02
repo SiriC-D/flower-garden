@@ -49,7 +49,7 @@ export default function FlowerGarden() {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
     
-    // Determine if it's a TouchEvent or a MouseEvent
+    // Determine if it's a TouchEvent (e.touches exists) or a MouseEvent
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
 
@@ -130,22 +130,22 @@ export default function FlowerGarden() {
     clearCanvas();
   };
 
-  // ---- Mobile touch handler wrappers (Pass event directly to unified functions) ----
+  // ---- Mobile touch handler wrappers ----
   const handleTouchStart = (e) => {
     // Prevent scrolling/zooming while drawing
     e.preventDefault(); 
-    // Pass the original TouchEvent object
+    // Pass the original TouchEvent object to the unified function
     startDrawing(e);
   };
 
   const handleTouchMove = (e) => {
     e.preventDefault();
-    // Pass the original TouchEvent object
+    // Pass the original TouchEvent object to the unified function
     draw(e);
   };
 
   const handleTouchEnd = stopDrawing; 
-  // -----------------------------
+  // -------------------------------------
 
   if (showGallery) {
     return (
