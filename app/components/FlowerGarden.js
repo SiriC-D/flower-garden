@@ -211,29 +211,40 @@ export default function FlowerGarden() {
           {/* Canvas */}
           <div className="rounded-2xl mb-6 bg-white mx-auto shadow-inner" style={{ border: '5px dashed #81C784', maxWidth: '500px' }}>
             <canvas
-              ref={canvasRef}
-              width={450}
-              height={450}
-              className="w-full cursor-crosshair rounded-2xl"
-              onMouseDown={startDrawing}
-              onMouseMove={draw}
-              onMouseUp={stopDrawing}
-              onMouseLeave={stopDrawing}
-              onTouchStart={(e) => {
-                e.preventDefault();
-                const touch = e.touches[0];
-                startDrawing({ clientX: touch.clientX, clientY: touch.clientY });
-              }}
-              onTouchMove={(e) => {
-                e.preventDefault();
-                const touch = e.touches[0];
-                draw({ clientX: touch.clientX, clientY: touch.clientY });
-              }}
-              onTouchEnd={(e) => {
-                e.preventDefault();
-                stopDrawing();
-              }}
-            />
+  ref={canvasRef}
+  width={450}
+  height={450}
+  className="w-full cursor-crosshair rounded-2xl"
+  onMouseDown={startDrawing}
+  onMouseMove={draw}
+  onMouseUp={stopDrawing}
+  onMouseLeave={stopDrawing}
+  onTouchStart={(e) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    startDrawing({
+      clientX: (touch.clientX - rect.left) * (canvas.width / rect.width),
+      clientY: (touch.clientY - rect.top) * (canvas.height / rect.height),
+    });
+  }}
+  onTouchMove={(e) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    draw({
+      clientX: (touch.clientX - rect.left) * (canvas.width / rect.width),
+      clientY: (touch.clientY - rect.top) * (canvas.height / rect.height),
+    });
+  }}
+  onTouchEnd={(e) => {
+    e.preventDefault();
+    stopDrawing();
+  }}
+/>
+
           </div>
 
           {/* Message */}
