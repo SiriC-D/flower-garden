@@ -307,7 +307,29 @@ export default function FlowerGarden() {
 
   // --- Supabase Storage Functions ---
 
+  const loadFlowers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('flowers')
+        .select('*')
+        .order('timestamp', { ascending: false })
+        .limit(100); // Limit to 100 most recent flowers
+
+      if (error) throw error;
+      
+      setFlowers(data || []);
+    } catch (error) {
+      console.error('Error loading flowers:', error);
+      setMessage('Failed to load flowers 😢');
+      setTimeout(() => setMessage(''), 3000);
+      setFlowers([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard fetch-on-mount
     loadFlowers();
   }, []);
 
@@ -370,9 +392,15 @@ export default function FlowerGarden() {
   }, []);
 
   // --- Client-side cooldown so one visitor can't flood the garden ---
+  // This reads a value from localStorage (an external source) once on mount.
+  // We intentionally keep it as an effect + direct setState rather than a
+  // lazy useState initializer: this component renders on the server first
+  // (where localStorage doesn't exist), so computing it during render would
+  // cause a hydration mismatch between server and client output.
   useEffect(() => {
     const lastPlantedAt = Number(localStorage.getItem('flowerGardenLastPlantedAt') || 0);
     const remaining = PLANT_COOLDOWN_MS - (Date.now() - lastPlantedAt);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (remaining > 0) setCooldownRemaining(remaining);
   }, []);
 
@@ -384,27 +412,6 @@ export default function FlowerGarden() {
     }, 1000);
     return () => clearInterval(interval);
   }, [isOnCooldown]);
-
-  const loadFlowers = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('flowers')
-        .select('*')
-        .order('timestamp', { ascending: false })
-        .limit(100); // Limit to 100 most recent flowers
-
-      if (error) throw error;
-      
-      setFlowers(data || []);
-    } catch (error) {
-      console.error('Error loading flowers:', error);
-      setMessage('Failed to load flowers 😢');
-      setTimeout(() => setMessage(''), 3000);
-      setFlowers([]);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const refreshGarden = async () => {
     setRefreshing(true);
