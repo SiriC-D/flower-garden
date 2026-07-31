@@ -1,7 +1,21 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Leaf, Image, RotateCcw, Sparkles, Circle, Droplet, RefreshCw } from 'lucide-react';
+import {
+  Leaf,
+  Image as ImageIcon,
+  RotateCcw,
+  Sparkles,
+  Circle,
+  Droplet,
+  RefreshCw,
+  Users,
+  Heart,
+  Undo2,
+  Redo2,
+  Download,
+  Trash2,
+} from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 // Initialize Supabase client
@@ -9,6 +23,15 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
+
+// Minimum time a visitor must wait between planting flowers (client-side throttle
+// to discourage casual spam; real abuse prevention should also live in Supabase
+// RLS / an Edge Function, since anything client-side can be bypassed).
+const PLANT_COOLDOWN_MS = 15000;
+
+// How many undo steps to keep in memory. The canvas is small (450x450) so each
+// snapshot is cheap, but we still cap it so a long doodling session can't grow forever.
+const MAX_HISTORY = 20;
 
 const COLORS = [
   '#E91E63', // Pink
@@ -39,6 +62,17 @@ export default function FlowerGarden() {
   const canvasRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [onlineCount, setOnlineCount] = useState(1);
+  const [cooldownRemaining, setCooldownRemaining] = useState(0);
+  const [userId, setUserId] = useState(null);
+  const [exporting, setExporting] = useState(false);
+
+  // Undo/redo history lives in refs (not state) since we don't want every
+  // brush stroke to trigger a re-render; canUndo/canRedo mirror it for the UI.
+  const historyRef = useRef([]);
+  const redoRef = useRef([]);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
 
   // --- Core Utility Functions ---
 
@@ -115,12 +149,65 @@ export default function FlowerGarden() {
     ctx.fill();
   }, [selectedColor, thickness]);
 
+  // --- Undo / Redo ---
+
+  const pushHistory = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const snapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    historyRef.current.push(snapshot);
+    if (historyRef.current.length > MAX_HISTORY) historyRef.current.shift();
+    redoRef.current = [];
+    setCanUndo(true);
+    setCanRedo(false);
+  }, []);
+
+  const undo = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || historyRef.current.length === 0) return;
+    const ctx = canvas.getContext('2d');
+
+    const current = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    redoRef.current.push(current);
+
+    const previous = historyRef.current.pop();
+    ctx.putImageData(previous, 0, 0);
+
+    setCanUndo(historyRef.current.length > 0);
+    setCanRedo(true);
+  }, []);
+
+  const redo = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || redoRef.current.length === 0) return;
+    const ctx = canvas.getContext('2d');
+
+    const current = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    historyRef.current.push(current);
+
+    const next = redoRef.current.pop();
+    ctx.putImageData(next, 0, 0);
+
+    setCanRedo(redoRef.current.length > 0);
+    setCanUndo(true);
+  }, []);
+
+  const resetHistory = useCallback(() => {
+    historyRef.current = [];
+    redoRef.current = [];
+    setCanUndo(false);
+    setCanRedo(false);
+  }, []);
+
   const startDrawing = useCallback((e) => {
     const { x, y } = getCoords(e);
     
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
+
+    pushHistory();
     
     ctx.strokeStyle = selectedColor;
     ctx.lineWidth = thickness;
@@ -140,7 +227,7 @@ export default function FlowerGarden() {
       ctx.beginPath();
       ctx.moveTo(x, y);
     }
-  }, [getCoords, selectedColor, thickness, brushType, drawGlow, drawSpray, drawFlower]);
+  }, [getCoords, selectedColor, thickness, brushType, drawGlow, drawSpray, drawFlower, pushHistory]);
 
   const stopDrawing = useCallback(() => setIsDrawing(false), []);
 
@@ -199,11 +286,104 @@ export default function FlowerGarden() {
     };
   }, [handleTouchStart, handleTouchMove, handleTouchEnd]);
 
+  // --- Auth: sign visitors in anonymously so they can own & delete their flowers ---
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          setUserId(session.user.id);
+          return;
+        }
+        const { data, error } = await supabase.auth.signInAnonymously();
+        if (error) throw error;
+        setUserId(data.user?.id ?? null);
+      } catch (error) {
+        console.error('Error signing in anonymously:', error);
+      }
+    };
+    initAuth();
+  }, []);
+
   // --- Supabase Storage Functions ---
-  
+
   useEffect(() => {
     loadFlowers();
   }, []);
+
+  // --- Realtime: new/removed flowers appear instantly for everyone ---
+  useEffect(() => {
+    const channel = supabase
+      .channel('flowers-realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'flowers' },
+        (payload) => {
+          setFlowers((prev) =>
+            prev.some((f) => f.id === payload.new.id) ? prev : [payload.new, ...prev]
+          );
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'flowers' },
+        (payload) => {
+          setFlowers((prev) =>
+            prev.map((f) => (f.id === payload.new.id ? payload.new : f))
+          );
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'flowers' },
+        (payload) => {
+          setFlowers((prev) => prev.filter((f) => f.id !== payload.old.id));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  // --- Presence: live "gardeners online" count ---
+  useEffect(() => {
+    const presenceChannel = supabase.channel('garden-presence', {
+      config: { presence: { key: crypto.randomUUID() } },
+    });
+
+    presenceChannel
+      .on('presence', { event: 'sync' }, () => {
+        const state = presenceChannel.presenceState();
+        setOnlineCount(Math.max(1, Object.keys(state).length));
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await presenceChannel.track({ online_at: new Date().toISOString() });
+        }
+      });
+
+    return () => {
+      supabase.removeChannel(presenceChannel);
+    };
+  }, []);
+
+  // --- Client-side cooldown so one visitor can't flood the garden ---
+  useEffect(() => {
+    const lastPlantedAt = Number(localStorage.getItem('flowerGardenLastPlantedAt') || 0);
+    const remaining = PLANT_COOLDOWN_MS - (Date.now() - lastPlantedAt);
+    if (remaining > 0) setCooldownRemaining(remaining);
+  }, []);
+
+  const isOnCooldown = cooldownRemaining > 0;
+  useEffect(() => {
+    if (!isOnCooldown) return;
+    const interval = setInterval(() => {
+      setCooldownRemaining((prev) => Math.max(0, prev - 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isOnCooldown]);
 
   const loadFlowers = async () => {
     try {
@@ -239,9 +419,22 @@ export default function FlowerGarden() {
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     setMessage('');
+    resetHistory();
   };
 
   const plantFlower = async () => {
+    if (cooldownRemaining > 0) {
+      setMessage(`Whoa, one at a time! Wait ${Math.ceil(cooldownRemaining / 1000)}s 🌱`);
+      setTimeout(() => setMessage(''), 2000);
+      return;
+    }
+
+    if (!userId) {
+      setMessage('Still connecting you to the garden, one sec... 🌱');
+      setTimeout(() => setMessage(''), 2000);
+      return;
+    }
+
     const canvas = canvasRef.current;
     const imageData = canvas.toDataURL('image/png');
     const ctx = canvas.getContext('2d');
@@ -260,16 +453,22 @@ export default function FlowerGarden() {
         .insert([
           { 
             image: imageData,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            waters: 0,
+            user_id: userId
           }
         ])
         .select();
 
       if (error) throw error;
 
-      // Add the new flower to the beginning of the array
+      // Add the new flower to the beginning of the array (realtime will also
+      // deliver this insert to us; the id check there prevents duplicates)
       setFlowers([data[0], ...flowers]);
-      
+
+      localStorage.setItem('flowerGardenLastPlantedAt', String(Date.now()));
+      setCooldownRemaining(PLANT_COOLDOWN_MS);
+
       setMessage('🌸 Planted! 🌸');
       setTimeout(() => setMessage(''), 2000);
       clearCanvas();
@@ -277,6 +476,101 @@ export default function FlowerGarden() {
       console.error('Error planting flower:', error);
       setMessage('Failed to plant flower 😢');
       setTimeout(() => setMessage(''), 3000);
+    }
+  };
+
+  const waterFlower = async (flower) => {
+    const newCount = (flower.waters || 0) + 1;
+    setFlowers((prev) =>
+      prev.map((f) => (f.id === flower.id ? { ...f, waters: newCount } : f))
+    );
+    // Uses a Postgres function (see supabase-migration.sql) rather than a raw
+    // update, so anyone can bump the water count without also being able to
+    // edit the flower's image, owner, or timestamp via RLS.
+    const { error } = await supabase.rpc('increment_waters', { flower_id: flower.id });
+    if (error) console.error('Error watering flower:', error);
+  };
+
+  const deleteFlower = async (flower) => {
+    const confirmed = window.confirm('Delete this flower? This can\'t be undone.');
+    if (!confirmed) return;
+
+    setFlowers((prev) => prev.filter((f) => f.id !== flower.id));
+    const { error } = await supabase.from('flowers').delete().eq('id', flower.id);
+    if (error) {
+      console.error('Error deleting flower:', error);
+      setMessage('Failed to delete flower 😢');
+      setTimeout(() => setMessage(''), 3000);
+      loadFlowers(); // resync in case the optimistic removal was wrong
+    }
+  };
+
+  const downloadFlowerImage = (flower) => {
+    const link = document.createElement('a');
+    link.download = `flower-${flower.id}.png`;
+    link.href = flower.image;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const exportGardenAsImage = async () => {
+    if (flowers.length === 0) return;
+    setExporting(true);
+    try {
+      const cols = 6;
+      const cellSize = 160;
+      const rows = Math.ceil(flowers.length / cols);
+
+      const exportCanvas = document.createElement('canvas');
+      exportCanvas.width = cols * cellSize;
+      exportCanvas.height = rows * cellSize + 60;
+      const ctx = exportCanvas.getContext('2d');
+
+      // Background
+      ctx.fillStyle = '#DCEDC8';
+      ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+      ctx.fillStyle = '#2E7D32';
+      ctx.font = 'bold 28px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('Community Flower Garden 🌸', exportCanvas.width / 2, 40);
+
+      await Promise.all(
+        flowers.map(
+          (flower, idx) =>
+            new Promise((resolve) => {
+              const img = new window.Image();
+              img.onload = () => {
+                const col = idx % cols;
+                const row = Math.floor(idx / cols);
+                const cellX = col * cellSize;
+                const cellY = row * cellSize + 60;
+                const scale = Math.min(cellSize / img.width, cellSize / img.height) * 0.85;
+                const w = img.width * scale;
+                const h = img.height * scale;
+                ctx.drawImage(
+                  img,
+                  cellX + (cellSize - w) / 2,
+                  cellY + (cellSize - h) / 2,
+                  w,
+                  h
+                );
+                resolve();
+              };
+              img.onerror = resolve;
+              img.src = flower.image;
+            })
+        )
+      );
+
+      const link = document.createElement('a');
+      link.download = `flower-garden-${new Date().toISOString().slice(0, 10)}.png`;
+      link.href = exportCanvas.toDataURL('image/png');
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -301,15 +595,67 @@ export default function FlowerGarden() {
               </button>
             </div>
             
-            <p className="text-2xl mb-6" style={{ color: '#558B2F' }}>{flowers.length} total flowers 🌺</p>
+            <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+              <p className="text-2xl" style={{ color: '#558B2F' }}>{flowers.length} total flowers 🌺</p>
+              <div className="flex items-center gap-3 flex-wrap">
+                <div
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold"
+                  style={{ background: '#E8F5E9', color: '#2E7D32', border: '2px solid #81C784' }}
+                >
+                  <Users size={16} />
+                  {onlineCount} gardening now
+                </div>
+                <button
+                  onClick={exportGardenAsImage}
+                  disabled={exporting || flowers.length === 0}
+                  aria-label="Export the whole garden as an image"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold shadow transition transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                  style={{ background: 'linear-gradient(135deg, #42A5F5, #1E88E5)', color: 'white', border: '2px solid #1565C0' }}
+                >
+                  <Download size={16} />
+                  {exporting ? 'Exporting...' : 'Export garden'}
+                </button>
+              </div>
+            </div>
             
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
               {flowers.map((flower) => (
                 <div key={flower.id} className="bg-white rounded-2xl p-3 shadow-lg transform hover:scale-110 transition" style={{ border: '3px solid #AED581' }}>
                   <img src={flower.image} alt="Community flower" className="w-full h-32 object-contain" />
-                  <p className="text-sm text-center mt-2" style={{ color: '#689F38' }}>
-                    {new Date(flower.timestamp).toLocaleDateString()}
-                  </p>
+                  <div className="flex items-center justify-between mt-2">
+                    <p className="text-sm" style={{ color: '#689F38' }}>
+                      {new Date(flower.timestamp).toLocaleDateString()}
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => waterFlower(flower)}
+                        aria-label="Water this flower"
+                        className="inline-flex items-center gap-1 text-sm font-bold px-2 py-1 rounded-full transition transform hover:scale-110"
+                        style={{ color: '#E91E63' }}
+                      >
+                        <Heart size={14} fill={flower.waters ? '#E91E63' : 'none'} />
+                        {flower.waters || 0}
+                      </button>
+                      <button
+                        onClick={() => downloadFlowerImage(flower)}
+                        aria-label="Download this flower"
+                        className="p-1 rounded-full transition transform hover:scale-110"
+                        style={{ color: '#1E88E5' }}
+                      >
+                        <Download size={14} />
+                      </button>
+                      {flower.user_id && flower.user_id === userId && (
+                        <button
+                          onClick={() => deleteFlower(flower)}
+                          aria-label="Delete this flower"
+                          className="p-1 rounded-full transition transform hover:scale-110"
+                          style={{ color: '#E53935' }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
@@ -333,7 +679,14 @@ export default function FlowerGarden() {
           <h1 className="text-6xl font-bold mb-3" style={{ color: '#2E7D32', textShadow: '4px 4px 0px #A5D6A7', letterSpacing: '2px' }}>
             Flower Gallery
           </h1>
-          <p className="text-2xl" style={{ color: '#558B2F' }}>{flowers.length} total flowers</p>
+          <p className="text-2xl mb-3" style={{ color: '#558B2F' }}>{flowers.length} total flowers</p>
+          <div
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold"
+            style={{ background: '#E8F5E9', color: '#2E7D32', border: '2px solid #81C784' }}
+          >
+            <Users size={16} />
+            {onlineCount} {onlineCount === 1 ? 'gardener' : 'gardeners'} here right now
+          </div>
         </div>
 
         {/* Garden Display */}
@@ -372,8 +725,18 @@ export default function FlowerGarden() {
               className="inline-flex items-center gap-3 px-8 py-4 text-white rounded-full text-2xl font-bold shadow-lg transform hover:scale-105 transition" 
               style={{ background: 'linear-gradient(135deg, #66BB6A, #43A047)', border: '3px solid #2E7D32' }}
             >
-              <Image size={28} />
+              <ImageIcon size={28} />
               See flower gallery
+            </button>
+
+            <button
+              onClick={exportGardenAsImage}
+              disabled={exporting || flowers.length === 0}
+              className="inline-flex items-center gap-3 px-6 py-3 text-white rounded-full text-xl font-bold shadow-lg transform hover:scale-105 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ background: 'linear-gradient(135deg, #AB47BC, #8E24AA)', border: '3px solid #6A1B9A' }}
+            >
+              <Download size={24} />
+              {exporting ? 'Exporting...' : 'Export garden'}
             </button>
           </div>
         </div>
@@ -504,6 +867,30 @@ export default function FlowerGarden() {
             </div>
           </div>
 
+          {/* Undo / Redo */}
+          <div className="mb-6 flex gap-3 justify-center">
+            <button
+              onClick={undo}
+              disabled={!canUndo}
+              aria-label="Undo last stroke"
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-full text-lg font-bold shadow-lg transform hover:scale-105 transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100"
+              style={{ background: '#E3F2FD', color: '#1565C0', border: '3px solid #90CAF9' }}
+            >
+              <Undo2 size={20} />
+              Undo
+            </button>
+            <button
+              onClick={redo}
+              disabled={!canRedo}
+              aria-label="Redo last undone stroke"
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-full text-lg font-bold shadow-lg transform hover:scale-105 transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100"
+              style={{ background: '#E3F2FD', color: '#1565C0', border: '3px solid #90CAF9' }}
+            >
+              <Redo2 size={20} />
+              Redo
+            </button>
+          </div>
+
           {/* Canvas */}
           <div className="rounded-2xl mb-6 bg-white mx-auto shadow-inner" style={{ border: '5px dashed #81C784', maxWidth: '500px' }}>
             <canvas
@@ -529,9 +916,14 @@ export default function FlowerGarden() {
               Clear
             </button>
             
-            <button onClick={plantFlower} className="inline-flex items-center gap-3 px-8 py-3 text-white rounded-full text-2xl font-bold shadow-lg transform hover:scale-105 transition" style={{ background: 'linear-gradient(135deg, #66BB6A, #43A047)', border: '3px solid #2E7D32' }}>
+            <button
+              onClick={plantFlower}
+              disabled={cooldownRemaining > 0}
+              className="inline-flex items-center gap-3 px-8 py-3 text-white rounded-full text-2xl font-bold shadow-lg transform hover:scale-105 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+              style={{ background: 'linear-gradient(135deg, #66BB6A, #43A047)', border: '3px solid #2E7D32' }}
+            >
               <Leaf size={28} />
-              Plant
+              {cooldownRemaining > 0 ? `Wait ${Math.ceil(cooldownRemaining / 1000)}s` : 'Plant'}
             </button>
           </div>
         </div>
