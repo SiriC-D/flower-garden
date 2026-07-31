@@ -37,22 +37,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <head>
-        {/* ✅ Comic Sans-style font from Google Fonts */}
-        <link
-          href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&display=swap"
-          rel="stylesheet"
-        />
-      </head>
-      <body
-        style={{
-          fontFamily: '"Comic Neue", "Comic Sans MS", cursive',
-          backgroundColor: "#F0F4C3",
-          color: "#2E7D32",
-        }}
-      >
-        {children}
-      </body>
+      <body className="antialiased">{children}</body>
     </html>
   );
 }
