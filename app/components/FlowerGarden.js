@@ -21,6 +21,7 @@ import {
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
+  X,
 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 
@@ -31,10 +32,8 @@ const supabase = createClient(
 
 const PLANT_COOLDOWN_MS = 8000;
 const MAX_HISTORY = 20;
-
-// Virtual garden size (px) — scrollable
-const GARDEN_W = 1600;
-const GARDEN_H = 1100;
+const GARDEN_W = 1800;
+const GARDEN_H = 1400;
 
 const FLOWER_TYPES = [
   { id: "rose", label: "Rose", emoji: "🌹", color: "#E91E63" },
@@ -52,7 +51,6 @@ const QUICK_COLORS = [
 const BRUSH_TYPES = { NORMAL: "normal", GLOW: "glow", SPRAY: "spray", FLOWER: "flower" };
 const THICKNESS_OPTIONS = [2, 4, 8, 12];
 
-/** Deterministic position inside the large garden canvas */
 function positionForId(id) {
   const s = String(id);
   let h1 = 2166136261;
@@ -63,12 +61,10 @@ function positionForId(id) {
     h2 ^= s.charCodeAt(s.length - 1 - i);
     h2 = Math.imul(h2, 16777619);
   }
-  // Padding so flowers aren't cut off at edges
-  const pad = 80;
+  const pad = 90;
   const x = pad + (Math.abs(h1) % (GARDEN_W - pad * 2));
   const y = pad + (Math.abs(h2) % (GARDEN_H - pad * 2));
-  // Slight size variation 56–88px
-  const size = 56 + (Math.abs(h1 + h2) % 33);
+  const size = 58 + (Math.abs(h1 + h2) % 36);
   return { x, y, size };
 }
 
@@ -85,7 +81,6 @@ function relativeTime(iso) {
 }
 
 export default function FlowerGarden() {
-  const [mode, setMode] = useState("quick");
   const [gardenerName, setGardenerName] = useState("");
   const [nameEditing, setNameEditing] = useState(false);
   const [userId, setUserId] = useState(null);
@@ -93,6 +88,8 @@ export default function FlowerGarden() {
   const [selectedType, setSelectedType] = useState(FLOWER_TYPES[0]);
   const [selectedColor, setSelectedColor] = useState(FLOWER_TYPES[0].color);
 
+  // draw modal
+  const [drawOpen, setDrawOpen] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
   const [customColor, setCustomColor] = useState("#FF69B4");
   const [brushType, setBrushType] = useState(BRUSH_TYPES.NORMAL);
@@ -114,7 +111,6 @@ export default function FlowerGarden() {
 
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
-
   const gardenScrollRef = useRef(null);
 
   useEffect(() => {
@@ -123,7 +119,6 @@ export default function FlowerGarden() {
     else setNameEditing(true);
   }, []);
 
-  // Center the scrollable garden on load
   useEffect(() => {
     const el = gardenScrollRef.current;
     if (!el || loading) return;
@@ -138,7 +133,7 @@ export default function FlowerGarden() {
     setNameEditing(false);
   };
 
-  // --- canvas helpers (unchanged) ---
+  // --- canvas ---
   const getCoords = useCallback((e) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
@@ -226,6 +221,13 @@ export default function FlowerGarden() {
     setCanRedo(false);
   }, []);
 
+  const clearCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    resetHistory();
+  };
+
   const startDrawing = useCallback((e) => {
     const { x, y } = getCoords(e);
     const canvas = canvasRef.current;
@@ -259,7 +261,7 @@ export default function FlowerGarden() {
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || mode !== "draw") return;
+    if (!canvas || !drawOpen) return;
     const ts = (e) => { e.preventDefault(); startDrawing(e); };
     const tm = (e) => { e.preventDefault(); draw(e); };
     const te = (e) => { e.preventDefault(); stopDrawing(); };
@@ -271,8 +273,9 @@ export default function FlowerGarden() {
       canvas.removeEventListener("touchmove", tm);
       canvas.removeEventListener("touchend", te);
     };
-  }, [mode, startDrawing, draw, stopDrawing]);
+  }, [drawOpen, startDrawing, draw, stopDrawing]);
 
+  // auth + data (same as before)
   useEffect(() => {
     (async () => {
       try {
@@ -344,14 +347,6 @@ export default function FlowerGarden() {
     const t = setInterval(() => setCooldownRemaining((p) => Math.max(0, p - 1000)), 1000);
     return () => clearInterval(t);
   }, [cooldownRemaining > 0]);
-
-  const clearCanvas = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
-    resetHistory();
-    setMessage("");
-  };
 
   const plantQuick = async () => {
     if (cooldownRemaining > 0) {
@@ -445,6 +440,7 @@ export default function FlowerGarden() {
       setMessage("🌸 Custom flower planted!");
       setTimeout(() => setMessage(""), 2500);
       clearCanvas();
+      setDrawOpen(false);
     } catch (err) {
       console.error(err);
       setMessage("Failed to plant 😢");
@@ -510,6 +506,7 @@ export default function FlowerGarden() {
   const maxTypeCount = Math.max(1, ...Object.values(typeCounts));
   const recent = flowers.slice(0, 8);
 
+  // ========== GALLERY ==========
   if (showGallery) {
     return (
       <div className="min-h-screen bg-[#F7F4ED] p-4 md:p-8">
@@ -533,7 +530,7 @@ export default function FlowerGarden() {
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
             {flowers.map((f) => (
-              <div key={f.id} className="bg-white rounded-2xl p-3 shadow-sm border border-[#C8E6C9] hover:shadow-md transition">
+              <div key={f.id} className="bg-white rounded-2xl p-3 shadow-sm border border-[#C8E6C9]">
                 <img src={f.image} alt="" className="w-full h-28 object-contain" />
                 <div className="mt-2 flex items-center justify-between text-xs text-[#689F38]">
                   <span className="truncate max-w-[70%]">{f.planter_name || "Anon"}</span>
@@ -554,7 +551,7 @@ export default function FlowerGarden() {
 
   return (
     <div className="h-screen flex flex-col bg-[#F5F0E8] text-[#2E3A2E] overflow-hidden">
-      {/* ===== HEADER ===== */}
+      {/* HEADER */}
       <header className="shrink-0 z-30 bg-[#FAF7F2]/90 backdrop-blur-md border-b border-[#E8E0D0]">
         <div className="px-4 md:px-6 h-14 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
@@ -570,37 +567,21 @@ export default function FlowerGarden() {
               </p>
             </div>
           </div>
-
           <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              onClick={() => setLeftOpen((v) => !v)}
-              className="p-2 rounded-lg hover:bg-[#EDE8DC] text-[#5A6A5A] transition lg:hidden"
-              title="Plant panel"
-            >
+            <button onClick={() => setLeftOpen((v) => !v)}
+              className="p-2 rounded-lg hover:bg-[#EDE8DC] text-[#5A6A5A] transition lg:hidden">
               {leftOpen ? <PanelLeftClose size={17} /> : <PanelLeftOpen size={17} />}
             </button>
-
-            <button
-              onClick={() => { setRefreshing(true); loadFlowers().finally(() => setRefreshing(false)); }}
-              className="p-2 rounded-lg hover:bg-[#EDE8DC] text-[#5A6A5A] transition"
-              title="Refresh"
-            >
+            <button onClick={() => { setRefreshing(true); loadFlowers().finally(() => setRefreshing(false)); }}
+              className="p-2 rounded-lg hover:bg-[#EDE8DC] text-[#5A6A5A] transition">
               <RefreshCw size={17} className={refreshing ? "animate-spin" : ""} />
             </button>
-
-            <button
-              onClick={() => setShowGallery(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-medium text-[#3D5A3D] hover:bg-[#EDE8DC] transition"
-            >
-              <ImageIcon size={15} />
-              <span className="hidden sm:inline">Gallery</span>
+            <button onClick={() => setShowGallery(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-medium text-[#3D5A3D] hover:bg-[#EDE8DC] transition">
+              <ImageIcon size={15} /> <span className="hidden sm:inline">Gallery</span>
             </button>
-
-            <button
-              onClick={() => setRightOpen((v) => !v)}
-              className="p-2 rounded-lg hover:bg-[#EDE8DC] text-[#5A6A5A] transition hidden lg:inline-flex"
-              title="Stats"
-            >
+            <button onClick={() => setRightOpen((v) => !v)}
+              className="p-2 rounded-lg hover:bg-[#EDE8DC] text-[#5A6A5A] transition hidden lg:inline-flex">
               {rightOpen ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}
             </button>
           </div>
@@ -608,12 +589,12 @@ export default function FlowerGarden() {
       </header>
 
       <div className="flex-1 flex min-h-0 relative">
-        {/* LEFT */}
+        {/* LEFT — quick plant only */}
         <aside className={`
           shrink-0 border-r border-[#E8E0D0] bg-[#FAF7F2] overflow-y-auto
-          transition-all duration-300 ease-in-out
+          transition-all duration-300
           ${leftOpen ? "w-[270px] opacity-100" : "w-0 opacity-0 overflow-hidden border-r-0"}
-          absolute lg:static inset-y-0 left-0 z-20 lg:z-0 shadow-xl lg:shadow-none
+          absolute lg:static inset-y-0 left-0 z-20 shadow-xl lg:shadow-none
         `}>
           <div className="p-4 space-y-4 w-[270px]">
             <div className="hidden lg:flex justify-end -mt-1">
@@ -632,123 +613,49 @@ export default function FlowerGarden() {
                   <button type="submit" className="px-2.5 py-1.5 rounded-lg bg-[#66BB6A] text-white text-sm font-semibold">Save</button>
                 </form>
               ) : (
-                <button onClick={() => setNameEditing(true)} className="flex items-center gap-1.5 text-[15px] font-semibold text-[#1B3A1B] hover:opacity-70">
+                <button onClick={() => setNameEditing(true)} className="flex items-center gap-1.5 text-[15px] font-semibold text-[#1B3A1B]">
                   {gardenerName || "Anonymous"} <Pencil size={12} className="text-[#8A9A8A]" />
                 </button>
               )}
             </div>
 
-            <div className="flex rounded-lg border border-[#D4CBB8] overflow-hidden text-[13px] font-medium">
-              <button onClick={() => setMode("quick")}
-                className={`flex-1 py-2 flex items-center justify-center gap-1 ${mode === "quick" ? "bg-[#E8F5E9] text-[#2E7D32]" : "bg-white text-[#6B7C6B]"}`}>
-                <Flower2 size={13} /> Quick plant
-              </button>
-              <button onClick={() => setMode("draw")}
-                className={`flex-1 py-2 flex items-center justify-center gap-1 ${mode === "draw" ? "bg-[#E8F5E9] text-[#2E7D32]" : "bg-white text-[#6B7C6B]"}`}>
-                <Pencil size={13} /> Draw
-              </button>
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-[#8A9A8A] mb-2">Flower Type</p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {FLOWER_TYPES.map((t) => (
+                  <button key={t.id} onClick={() => { setSelectedType(t); setSelectedColor(t.color); }}
+                    className={`flex flex-col items-center gap-0.5 p-2 rounded-xl border-2 transition ${
+                      selectedType.id === t.id ? "border-[#66BB6A] bg-[#E8F5E9]" : "border-transparent bg-white hover:bg-[#F5F1E8]"
+                    }`}>
+                    <span className="text-lg">{t.emoji}</span>
+                    <span className="text-[11px] font-medium">{t.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {mode === "quick" ? (
-              <>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-[#8A9A8A] mb-2">Flower Type</p>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {FLOWER_TYPES.map((t) => (
-                      <button key={t.id} onClick={() => { setSelectedType(t); setSelectedColor(t.color); }}
-                        className={`flex flex-col items-center gap-0.5 p-2 rounded-xl border-2 transition ${
-                          selectedType.id === t.id ? "border-[#66BB6A] bg-[#E8F5E9]" : "border-transparent bg-white hover:bg-[#F5F1E8]"
-                        }`}>
-                        <span className="text-lg">{t.emoji}</span>
-                        <span className="text-[11px] font-medium">{t.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-[#8A9A8A] mb-2">Color</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {QUICK_COLORS.map((c) => (
-                      <button key={c} onClick={() => setSelectedColor(c)}
-                        className={`w-6 h-6 rounded-full border-2 transition ${selectedColor === c ? "border-[#1B3A1B] scale-110" : "border-white shadow-sm"}`}
-                        style={{ backgroundColor: c }} />
-                    ))}
-                  </div>
-                  <div className="mt-2 h-1 rounded-full" style={{ backgroundColor: selectedColor }} />
-                </div>
-                <button onClick={plantQuick} disabled={cooldownRemaining > 0}
-                  className="w-full py-2.5 rounded-xl bg-[#66BB6A] hover:bg-[#43A047] text-white font-semibold text-sm shadow-sm transition disabled:opacity-50 flex items-center justify-center gap-2">
-                  <Leaf size={16} />
-                  {cooldownRemaining > 0 ? `Wait ${Math.ceil(cooldownRemaining / 1000)}s` : "Plant flower"}
-                </button>
-              </>
-            ) : (
-              <>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-[#8A9A8A] mb-1.5">Colors</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {QUICK_COLORS.map((c) => (
-                      <button key={c} onClick={() => setSelectedColor(c)}
-                        className={`w-6 h-6 rounded-full border-2 ${selectedColor === c ? "border-[#1B3A1B] scale-110" : "border-white shadow-sm"}`}
-                        style={{ backgroundColor: c }} />
-                    ))}
-                    <input type="color" value={customColor}
-                      onChange={(e) => { setCustomColor(e.target.value); setSelectedColor(e.target.value); }}
-                      className="w-6 h-6 rounded-full cursor-pointer" />
-                  </div>
-                </div>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-[#8A9A8A] mb-1.5">Brush</p>
-                  <div className="grid grid-cols-2 gap-1 text-[11px]">
-                    {[[BRUSH_TYPES.NORMAL, Circle, "Normal"], [BRUSH_TYPES.GLOW, Sparkles, "Glow"],
-                      [BRUSH_TYPES.SPRAY, Droplet, "Spray"], [BRUSH_TYPES.FLOWER, Flower2, "Flower"]].map(([type, Icon, label]) => (
-                      <button key={type} onClick={() => setBrushType(type)}
-                        className={`flex items-center gap-1 px-1.5 py-1.5 rounded-lg border ${
-                          brushType === type ? "bg-[#E8F5E9] border-[#66BB6A] text-[#2E7D32]" : "bg-white border-[#E0D9C8]"
-                        }`}>
-                        <Icon size={11} /> {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-[#8A9A8A] mb-1.5">Thickness</p>
-                  <div className="flex gap-1.5">
-                    {THICKNESS_OPTIONS.map((s) => (
-                      <button key={s} onClick={() => setThickness(s)}
-                        className={`w-8 h-8 rounded-full flex items-center justify-center border-2 ${
-                          thickness === s ? "border-[#1B3A1B] bg-[#E8F5E9]" : "border-white bg-white shadow-sm"
-                        }`}>
-                        <div className="rounded-full bg-[#2E7D32]" style={{ width: s * 1.4, height: s * 1.4 }} />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex gap-1.5">
-                  <button onClick={undo} disabled={!canUndo} className="flex-1 py-1.5 rounded-lg border text-[11px] disabled:opacity-40">
-                    <Undo2 size={11} className="inline mr-0.5" /> Undo
-                  </button>
-                  <button onClick={redo} disabled={!canRedo} className="flex-1 py-1.5 rounded-lg border text-[11px] disabled:opacity-40">
-                    <Redo2 size={11} className="inline mr-0.5" /> Redo
-                  </button>
-                </div>
-                <div className="rounded-xl overflow-hidden border-2 border-dashed border-[#C8E6C9] bg-white">
-                  <canvas ref={canvasRef} width={400} height={280}
-                    className="w-full cursor-crosshair" style={{ touchAction: "none" }}
-                    onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseLeave={stopDrawing} />
-                </div>
-                <div className="flex gap-1.5">
-                  <button onClick={clearCanvas} className="flex-1 py-2 rounded-xl border border-[#D4CBB8] text-[11px] font-medium">
-                    <RotateCcw size={11} className="inline mr-0.5" /> Clear
-                  </button>
-                  <button onClick={plantDrawn} disabled={cooldownRemaining > 0}
-                    className="flex-[2] py-2 rounded-xl bg-[#66BB6A] text-white font-semibold text-[11px] disabled:opacity-50">
-                    <Leaf size={11} className="inline mr-0.5" />
-                    {cooldownRemaining > 0 ? `Wait ${Math.ceil(cooldownRemaining / 1000)}s` : "Plant drawing"}
-                  </button>
-                </div>
-              </>
-            )}
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-[#8A9A8A] mb-2">Color</p>
+              <div className="flex flex-wrap gap-1.5">
+                {QUICK_COLORS.map((c) => (
+                  <button key={c} onClick={() => setSelectedColor(c)}
+                    className={`w-6 h-6 rounded-full border-2 ${selectedColor === c ? "border-[#1B3A1B] scale-110" : "border-white shadow-sm"}`}
+                    style={{ backgroundColor: c }} />
+                ))}
+              </div>
+              <div className="mt-2 h-1 rounded-full" style={{ backgroundColor: selectedColor }} />
+            </div>
+
+            <button onClick={plantQuick} disabled={cooldownRemaining > 0}
+              className="w-full py-2.5 rounded-xl bg-[#66BB6A] hover:bg-[#43A047] text-white font-semibold text-sm shadow-sm transition disabled:opacity-50 flex items-center justify-center gap-2">
+              <Leaf size={16} />
+              {cooldownRemaining > 0 ? `Wait ${Math.ceil(cooldownRemaining / 1000)}s` : "Plant flower"}
+            </button>
+
+            <button onClick={() => setDrawOpen(true)}
+              className="w-full py-2.5 rounded-xl border-2 border-dashed border-[#C8E6C9] text-[#2E7D32] font-semibold text-sm hover:bg-[#E8F5E9] transition flex items-center justify-center gap-2">
+              <Pencil size={16} /> Draw your own
+            </button>
 
             {message && (
               <div className="text-center text-[12px] font-medium text-[#2E7D32] bg-[#E8F5E9] rounded-lg py-2 px-2">
@@ -760,38 +667,29 @@ export default function FlowerGarden() {
 
         {!leftOpen && (
           <button onClick={() => setLeftOpen(true)}
-            className="absolute left-2 top-1/2 -translate-y-1/2 z-10 p-2 rounded-full bg-white border border-[#D4CBB8] shadow-md hover:bg-[#F0EBE0] hidden lg:flex"
-            title="Open plant panel">
+            className="absolute left-2 top-1/2 -translate-y-1/2 z-10 p-2 rounded-full bg-white border border-[#D4CBB8] shadow-md hidden lg:flex">
             <PanelLeftOpen size={16} />
           </button>
         )}
 
-        {/* ===== SCROLLABLE GARDEN ===== */}
+        {/* SCROLLABLE GARDEN (both axes) */}
         <main
           ref={gardenScrollRef}
           className="flex-1 min-w-0 overflow-auto bg-[#E4EED8]"
           style={{ scrollbarWidth: "thin" }}
         >
-          <div
-            className="relative"
-            style={{ width: GARDEN_W, height: GARDEN_H }}
-          >
-            {/* soft grass texture */}
-            <div
-              className="absolute inset-0 pointer-events-none opacity-40"
+          <div className="relative" style={{ width: GARDEN_W, height: GARDEN_H }}>
+            <div className="absolute inset-0 pointer-events-none opacity-35"
               style={{
                 backgroundImage: `
-                  radial-gradient(ellipse at 20% 30%, rgba(255,200,220,0.25) 0%, transparent 50%),
-                  radial-gradient(ellipse at 80% 60%, rgba(255,220,180,0.2) 0%, transparent 45%),
-                  radial-gradient(ellipse at 50% 80%, rgba(200,230,180,0.3) 0%, transparent 40%)
+                  radial-gradient(ellipse at 20% 25%, rgba(255,200,220,0.3) 0%, transparent 50%),
+                  radial-gradient(ellipse at 75% 55%, rgba(255,220,180,0.25) 0%, transparent 45%),
+                  radial-gradient(ellipse at 45% 80%, rgba(200,230,180,0.35) 0%, transparent 40%)
                 `,
               }}
             />
-
             {loading ? (
-              <div className="absolute inset-0 flex items-center justify-center text-[#558B2F] text-lg">
-                Loading garden… 🌱
-              </div>
+              <div className="absolute inset-0 flex items-center justify-center text-[#558B2F] text-lg">Loading garden… 🌱</div>
             ) : flowers.length === 0 ? (
               <div className="absolute inset-0 flex items-center justify-center text-center text-[#558B2F]">
                 <div>
@@ -804,25 +702,13 @@ export default function FlowerGarden() {
               flowers.map((f) => {
                 const { x, y, size } = positionForId(f.id);
                 return (
-                  <div
-                    key={f.id}
-                    className="absolute hover:scale-110 hover:z-20 transition-transform duration-150 cursor-default"
-                    style={{
-                      left: x,
-                      top: y,
-                      width: size,
-                      height: size * 1.15,
-                      transform: "translate(-50%, -50%)",
-                    }}
+                  <div key={f.id}
+                    className="absolute hover:scale-110 hover:z-20 transition-transform duration-150"
+                    style={{ left: x, top: y, width: size, height: size * 1.15, transform: "translate(-50%, -50%)" }}
                     title={`${f.planter_name || "Anon"} · ${relativeTime(f.timestamp)}`}
                   >
-                    <img
-                      src={f.image}
-                      alt=""
-                      className="w-full h-full object-contain"
-                      style={{ filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.15))" }}
-                      draggable={false}
-                    />
+                    <img src={f.image} alt="" className="w-full h-full object-contain"
+                      style={{ filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.15))" }} draggable={false} />
                   </div>
                 );
               })
@@ -830,10 +716,9 @@ export default function FlowerGarden() {
           </div>
         </main>
 
-        {/* RIGHT */}
+        {/* RIGHT STATS */}
         <aside className={`
-          shrink-0 border-l border-[#E8E0D0] bg-[#FAF7F2] overflow-y-auto
-          transition-all duration-300 ease-in-out
+          shrink-0 border-l border-[#E8E0D0] bg-[#FAF7F2] overflow-y-auto transition-all duration-300
           ${rightOpen ? "w-[220px] opacity-100" : "w-0 opacity-0 overflow-hidden border-l-0"}
           hidden lg:block
         `}>
@@ -847,27 +732,20 @@ export default function FlowerGarden() {
                 <PanelRightClose size={14} />
               </button>
             </div>
-
             <div className="rounded-xl bg-[#E8F5E9] p-3 flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-[#66BB6A]">
-                <Flower2 size={15} />
-              </div>
+              <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-[#66BB6A]"><Flower2 size={15} /></div>
               <div>
                 <p className="text-lg font-bold text-[#1B3A1B] leading-none">{flowers.length}</p>
                 <p className="text-[10px] text-[#558B2F]">Flowers planted</p>
               </div>
             </div>
-
             <div className="rounded-xl bg-[#FFF3E0] p-3 flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-[#FB8C00]">
-                <Users size={15} />
-              </div>
+              <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-[#FB8C00]"><Users size={15} /></div>
               <div>
                 <p className="text-lg font-bold text-[#1B3A1B] leading-none">{onlineCount}</p>
                 <p className="text-[10px] text-[#E65100]">Gardeners online</p>
               </div>
             </div>
-
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-[#8A9A8A] mb-2">Species</p>
               <div className="space-y-1.5">
@@ -878,32 +756,27 @@ export default function FlowerGarden() {
                       <span className="text-[#8A9A8A]">{typeCounts[t.id]}</span>
                     </div>
                     <div className="h-1 rounded-full bg-[#EDE8DC] overflow-hidden">
-                      <div className="h-full rounded-full transition-all"
-                        style={{ width: `${(typeCounts[t.id] / maxTypeCount) * 100}%`, backgroundColor: t.color }} />
+                      <div className="h-full rounded-full" style={{ width: `${(typeCounts[t.id] / maxTypeCount) * 100}%`, backgroundColor: t.color }} />
                     </div>
                   </div>
                 ))}
               </div>
             </div>
-
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-[#8A9A8A] mb-2">Recent</p>
               <div className="space-y-2">
                 {recent.map((f) => {
                   const type = FLOWER_TYPES.find((t) => t.id === f.flower_type) || { emoji: "🌸", label: "Custom" };
                   return (
-                    <div key={f.id} className="flex items-start gap-1.5 text-sm">
-                      <span className="text-sm leading-none mt-0.5">{type.emoji}</span>
+                    <div key={f.id} className="flex items-start gap-1.5">
+                      <span className="text-sm mt-0.5">{type.emoji}</span>
                       <div className="min-w-0">
                         <p className="font-medium text-[#1B3A1B] truncate text-[12px]">{f.planter_name || "Anonymous"}</p>
-                        <p className="text-[10px] text-[#8A9A8A]">
-                          {type.label} · {relativeTime(f.timestamp)}
-                        </p>
+                        <p className="text-[10px] text-[#8A9A8A]">{type.label} · {relativeTime(f.timestamp)}</p>
                       </div>
                     </div>
                   );
                 })}
-                {!recent.length && <p className="text-xs text-[#8A9A8A]">No activity yet</p>}
               </div>
             </div>
           </div>
@@ -911,12 +784,100 @@ export default function FlowerGarden() {
 
         {!rightOpen && (
           <button onClick={() => setRightOpen(true)}
-            className="absolute right-2 top-1/2 -translate-y-1/2 z-10 p-2 rounded-full bg-white border border-[#D4CBB8] shadow-md hover:bg-[#F0EBE0] hidden lg:flex"
-            title="Open stats">
+            className="absolute right-2 top-1/2 -translate-y-1/2 z-10 p-2 rounded-full bg-white border border-[#D4CBB8] shadow-md hidden lg:flex">
             <PanelRightOpen size={16} />
           </button>
         )}
       </div>
+
+      {/* ===== DRAW MODAL ===== */}
+      {drawOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="bg-[#FAF7F2] rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-[#E8E0D0]">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#E8E0D0]">
+              <h2 className="text-lg font-semibold text-[#1B3A1B]">Draw a flower</h2>
+              <button onClick={() => { setDrawOpen(false); clearCanvas(); }}
+                className="p-1.5 rounded-lg hover:bg-[#EDE8DC] text-[#5A6A5A]">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* colors */}
+              <div className="flex flex-wrap gap-2 items-center">
+                {QUICK_COLORS.map((c) => (
+                  <button key={c} onClick={() => setSelectedColor(c)}
+                    className={`w-7 h-7 rounded-full border-2 ${selectedColor === c ? "border-[#1B3A1B] scale-110" : "border-white shadow-sm"}`}
+                    style={{ backgroundColor: c }} />
+                ))}
+                <input type="color" value={customColor}
+                  onChange={(e) => { setCustomColor(e.target.value); setSelectedColor(e.target.value); }}
+                  className="w-7 h-7 rounded-full cursor-pointer" />
+              </div>
+
+              {/* brushes + thickness */}
+              <div className="flex flex-wrap gap-2 items-center">
+                {[[BRUSH_TYPES.NORMAL, Circle, "Normal"], [BRUSH_TYPES.GLOW, Sparkles, "Glow"],
+                  [BRUSH_TYPES.SPRAY, Droplet, "Spray"], [BRUSH_TYPES.FLOWER, Flower2, "Flower"]].map(([type, Icon, label]) => (
+                  <button key={type} onClick={() => setBrushType(type)}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs border ${
+                      brushType === type ? "bg-[#E8F5E9] border-[#66BB6A] text-[#2E7D32]" : "bg-white border-[#E0D9C8]"
+                    }`}>
+                    <Icon size={12} /> {label}
+                  </button>
+                ))}
+                <div className="w-px h-5 bg-[#E0D9C8] mx-1" />
+                {THICKNESS_OPTIONS.map((s) => (
+                  <button key={s} onClick={() => setThickness(s)}
+                    className={`w-8 h-8 rounded-full flex items-center justify-center border-2 ${
+                      thickness === s ? "border-[#1B3A1B] bg-[#E8F5E9]" : "border-white bg-white shadow-sm"
+                    }`}>
+                    <div className="rounded-full bg-[#2E7D32]" style={{ width: s * 1.4, height: s * 1.4 }} />
+                  </button>
+                ))}
+              </div>
+
+              {/* canvas */}
+              <div className="rounded-xl overflow-hidden border-2 border-[#C8E6C9] bg-white mx-auto" style={{ maxWidth: 520 }}>
+                <canvas
+                  ref={canvasRef}
+                  width={500}
+                  height={400}
+                  className="w-full cursor-crosshair block"
+                  style={{ touchAction: "none" }}
+                  onMouseDown={startDrawing}
+                  onMouseMove={draw}
+                  onMouseUp={stopDrawing}
+                  onMouseLeave={stopDrawing}
+                />
+              </div>
+
+              {/* actions */}
+              <div className="flex flex-wrap gap-2 justify-between">
+                <div className="flex gap-2">
+                  <button onClick={undo} disabled={!canUndo}
+                    className="px-3 py-2 rounded-lg border text-sm disabled:opacity-40">
+                    <Undo2 size={14} className="inline mr-1" /> Undo
+                  </button>
+                  <button onClick={redo} disabled={!canRedo}
+                    className="px-3 py-2 rounded-lg border text-sm disabled:opacity-40">
+                    <Redo2 size={14} className="inline mr-1" /> Redo
+                  </button>
+                  <button onClick={clearCanvas}
+                    className="px-3 py-2 rounded-lg border text-sm">
+                    <RotateCcw size={14} className="inline mr-1" /> Clear
+                  </button>
+                </div>
+                <button onClick={plantDrawn} disabled={cooldownRemaining > 0}
+                  className="px-5 py-2 rounded-xl bg-[#66BB6A] hover:bg-[#43A047] text-white font-semibold text-sm disabled:opacity-50 flex items-center gap-2">
+                  <Leaf size={16} />
+                  {cooldownRemaining > 0 ? `Wait ${Math.ceil(cooldownRemaining / 1000)}s` : "Plant drawing"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
