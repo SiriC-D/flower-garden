@@ -1,6 +1,27 @@
 @import "tailwindcss";
 
+/* Reset + base */
+html,
 body {
+  height: 100%;
   margin: 0;
-  min-height: 100vh;
+}
+
+body {
+  background: #f7f4ed;
+  color: #2e3a2e;
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Soft scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #c8e6c9 transparent;
 }
