@@ -51,6 +51,73 @@ const QUICK_COLORS = [
 const BRUSH_TYPES = { NORMAL: "normal", GLOW: "glow", SPRAY: "spray", FLOWER: "flower" };
 const THICKNESS_OPTIONS = [2, 4, 8, 12];
 
+/** Build a unique SVG per flower type */
+function makeFlowerSvg(typeId, color) {
+  const stem = `
+    <line x1="60" y1="78" x2="60" y2="132" stroke="#2E7D32" stroke-width="5" stroke-linecap="round"/>
+    <ellipse cx="46" cy="105" rx="12" ry="7" fill="#66BB6A" transform="rotate(-35 46 105)"/>
+    <ellipse cx="74" cy="110" rx="11" ry="6" fill="#66BB6A" transform="rotate(30 74 110)"/>
+  `;
+
+  if (typeId === "sunflower") {
+    const petals = Array.from({ length: 12 }, (_, i) => {
+      const a = (i / 12) * Math.PI * 2 - Math.PI / 2;
+      const x = 60 + Math.cos(a) * 32;
+      const y = 48 + Math.sin(a) * 32;
+      return `<ellipse cx="${x}" cy="${y}" rx="10" ry="18" fill="${color}" transform="rotate(${(a * 180) / Math.PI} ${x} ${y})"/>`;
+    }).join("");
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="140" viewBox="0 0 120 140">${stem}${petals}<circle cx="60" cy="48" r="16" fill="#5D4037"/><circle cx="60" cy="48" r="11" fill="#3E2723"/></svg>`;
+  }
+
+  if (typeId === "tulip") {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="140" viewBox="0 0 120 140">${stem}
+      <path d="M60 30 C40 30 32 55 32 70 C32 82 44 90 60 90 C76 90 88 82 88 70 C88 55 80 30 60 30Z" fill="${color}"/>
+      <path d="M48 35 C44 50 46 70 60 85" fill="none" stroke="rgba(0,0,0,0.12)" stroke-width="2"/>
+      <path d="M72 35 C76 50 74 70 60 85" fill="none" stroke="rgba(0,0,0,0.12)" stroke-width="2"/>
+    </svg>`;
+  }
+
+  if (typeId === "daisy") {
+    const petals = Array.from({ length: 10 }, (_, i) => {
+      const a = (i / 10) * Math.PI * 2;
+      const x = 60 + Math.cos(a) * 26;
+      const y = 48 + Math.sin(a) * 26;
+      return `<ellipse cx="${x}" cy="${y}" rx="9" ry="16" fill="${color}" transform="rotate(${(a * 180) / Math.PI} ${x} ${y})"/>`;
+    }).join("");
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="140" viewBox="0 0 120 140">${stem}${petals}<circle cx="60" cy="48" r="12" fill="#FFEB3B"/><circle cx="60" cy="48" r="6" fill="#F9A825"/></svg>`;
+  }
+
+  if (typeId === "cherry") {
+    const blooms = [
+      [60, 42], [38, 52], [82, 52], [45, 32], [75, 32],
+    ].map(([cx, cy], i) => {
+      const petals = Array.from({ length: 5 }, (_, j) => {
+        const a = (j / 5) * Math.PI * 2 - Math.PI / 2;
+        const px = cx + Math.cos(a) * 10;
+        const py = cy + Math.sin(a) * 10;
+        return `<circle cx="${px}" cy="${py}" r="7" fill="${color}" opacity="${0.85 + (i % 2) * 0.1}"/>`;
+      }).join("");
+      return `${petals}<circle cx="${cx}" cy="${cy}" r="4" fill="#FFF59D"/>`;
+    }).join("");
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="140" viewBox="0 0 120 140">${stem}${blooms}</svg>`;
+  }
+
+  // rose (default) — layered petals
+  const layers = [
+    { r: 28, n: 6, o: 0.55 },
+    { r: 20, n: 6, o: 0.75 },
+    { r: 12, n: 5, o: 0.95 },
+  ].map(({ r, n, o }) =>
+    Array.from({ length: n }, (_, i) => {
+      const a = (i / n) * Math.PI * 2 + r * 0.05;
+      const x = 60 + Math.cos(a) * r * 0.55;
+      const y = 48 + Math.sin(a) * r * 0.55;
+      return `<circle cx="${x}" cy="${y}" r="${r * 0.45}" fill="${color}" opacity="${o}"/>`;
+    }).join("")
+  ).join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="140" viewBox="0 0 120 140">${stem}${layers}<circle cx="60" cy="48" r="8" fill="#C62828"/><circle cx="60" cy="48" r="4" fill="#FFCDD2"/></svg>`;
+}
+
 function positionForId(id) {
   const s = String(id);
   let h1 = 2166136261;
@@ -88,7 +155,6 @@ export default function FlowerGarden() {
   const [selectedType, setSelectedType] = useState(FLOWER_TYPES[0]);
   const [selectedColor, setSelectedColor] = useState(FLOWER_TYPES[0].color);
 
-  // draw modal
   const [drawOpen, setDrawOpen] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
   const [customColor, setCustomColor] = useState("#FF69B4");
@@ -133,7 +199,6 @@ export default function FlowerGarden() {
     setNameEditing(false);
   };
 
-  // --- canvas ---
   const getCoords = useCallback((e) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
@@ -275,7 +340,6 @@ export default function FlowerGarden() {
     };
   }, [drawOpen, startDrawing, draw, stopDrawing]);
 
-  // auth + data (same as before)
   useEffect(() => {
     (async () => {
       try {
@@ -312,10 +376,19 @@ export default function FlowerGarden() {
     const channel = supabase
       .channel("flowers-realtime")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "flowers" }, (payload) => {
-        setFlowers((prev) => prev.some((f) => f.id === payload.new.id) ? prev : [payload.new, ...prev]);
+        setFlowers((prev) =>
+          prev.some((f) => f.id === payload.new.id) ? prev : [payload.new, ...prev]
+        );
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "flowers" }, (payload) => {
-        setFlowers((prev) => prev.map((f) => (f.id === payload.new.id ? payload.new : f)));
+        // Merge only — keep existing image if payload omits it
+        setFlowers((prev) =>
+          prev.map((f) =>
+            f.id === payload.new.id
+              ? { ...f, waters: payload.new.waters ?? f.waters }
+              : f
+          )
+        );
       })
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "flowers" }, (payload) => {
         setFlowers((prev) => prev.filter((f) => f.id !== payload.old.id));
@@ -366,19 +439,9 @@ export default function FlowerGarden() {
       return;
     }
 
-    const svg = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="120" height="140" viewBox="0 0 120 140">
-        <line x1="60" y1="70" x2="60" y2="130" stroke="#2E7D32" stroke-width="6" stroke-linecap="round"/>
-        <ellipse cx="48" cy="100" rx="14" ry="8" fill="#66BB6A" transform="rotate(-30 48 100)"/>
-        <ellipse cx="72" cy="105" rx="12" ry="7" fill="#66BB6A" transform="rotate(25 72 105)"/>
-        ${[0,1,2,3,4,5].map((i) => {
-          const a = (i / 6) * Math.PI * 2;
-          return `<circle cx="${60 + Math.cos(a) * 28}" cy="${48 + Math.sin(a) * 28}" r="18" fill="${selectedColor}"/>`;
-        }).join("")}
-        <circle cx="60" cy="48" r="14" fill="#FFEB3B"/>
-        <circle cx="60" cy="48" r="7" fill="#F9A825"/>
-      </svg>`;
-    const imageData = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svg)));
+    const svg = makeFlowerSvg(selectedType.id, selectedColor);
+    const imageData =
+      "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svg)));
 
     try {
       const { data, error } = await supabase.from("flowers").insert([{
@@ -450,7 +513,9 @@ export default function FlowerGarden() {
 
   const waterFlower = async (flower) => {
     const next = (flower.waters || 0) + 1;
-    setFlowers((prev) => prev.map((f) => (f.id === flower.id ? { ...f, waters: next } : f)));
+    setFlowers((prev) =>
+      prev.map((f) => (f.id === flower.id ? { ...f, waters: next } : f))
+    );
     const { error } = await supabase.rpc("increment_waters", { flower_id: flower.id });
     if (error) console.error(error);
   };
@@ -506,7 +571,6 @@ export default function FlowerGarden() {
   const maxTypeCount = Math.max(1, ...Object.values(typeCounts));
   const recent = flowers.slice(0, 8);
 
-  // ========== GALLERY ==========
   if (showGallery) {
     return (
       <div className="min-h-screen bg-[#F7F4ED] p-4 md:p-8">
@@ -551,7 +615,6 @@ export default function FlowerGarden() {
 
   return (
     <div className="h-screen flex flex-col bg-[#F5F0E8] text-[#2E3A2E] overflow-hidden">
-      {/* HEADER */}
       <header className="shrink-0 z-30 bg-[#FAF7F2]/90 backdrop-blur-md border-b border-[#E8E0D0]">
         <div className="px-4 md:px-6 h-14 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
@@ -589,10 +652,8 @@ export default function FlowerGarden() {
       </header>
 
       <div className="flex-1 flex min-h-0 relative">
-        {/* LEFT — quick plant only */}
         <aside className={`
-          shrink-0 border-r border-[#E8E0D0] bg-[#FAF7F2] overflow-y-auto
-          transition-all duration-300
+          shrink-0 border-r border-[#E8E0D0] bg-[#FAF7F2] overflow-y-auto transition-all duration-300
           ${leftOpen ? "w-[270px] opacity-100" : "w-0 opacity-0 overflow-hidden border-r-0"}
           absolute lg:static inset-y-0 left-0 z-20 shadow-xl lg:shadow-none
         `}>
@@ -672,12 +733,7 @@ export default function FlowerGarden() {
           </button>
         )}
 
-        {/* SCROLLABLE GARDEN (both axes) */}
-        <main
-          ref={gardenScrollRef}
-          className="flex-1 min-w-0 overflow-auto bg-[#E4EED8]"
-          style={{ scrollbarWidth: "thin" }}
-        >
+        <main ref={gardenScrollRef} className="flex-1 min-w-0 overflow-auto bg-[#E4EED8]" style={{ scrollbarWidth: "thin" }}>
           <div className="relative" style={{ width: GARDEN_W, height: GARDEN_H }}>
             <div className="absolute inset-0 pointer-events-none opacity-35"
               style={{
@@ -716,7 +772,6 @@ export default function FlowerGarden() {
           </div>
         </main>
 
-        {/* RIGHT STATS */}
         <aside className={`
           shrink-0 border-l border-[#E8E0D0] bg-[#FAF7F2] overflow-y-auto transition-all duration-300
           ${rightOpen ? "w-[220px] opacity-100" : "w-0 opacity-0 overflow-hidden border-l-0"}
@@ -790,7 +845,7 @@ export default function FlowerGarden() {
         )}
       </div>
 
-      {/* ===== DRAW MODAL ===== */}
+      {/* DRAW MODAL */}
       {drawOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
           <div className="bg-[#FAF7F2] rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-[#E8E0D0]">
@@ -801,9 +856,7 @@ export default function FlowerGarden() {
                 <X size={18} />
               </button>
             </div>
-
             <div className="p-5 space-y-4">
-              {/* colors */}
               <div className="flex flex-wrap gap-2 items-center">
                 {QUICK_COLORS.map((c) => (
                   <button key={c} onClick={() => setSelectedColor(c)}
@@ -814,8 +867,6 @@ export default function FlowerGarden() {
                   onChange={(e) => { setCustomColor(e.target.value); setSelectedColor(e.target.value); }}
                   className="w-7 h-7 rounded-full cursor-pointer" />
               </div>
-
-              {/* brushes + thickness */}
               <div className="flex flex-wrap gap-2 items-center">
                 {[[BRUSH_TYPES.NORMAL, Circle, "Normal"], [BRUSH_TYPES.GLOW, Sparkles, "Glow"],
                   [BRUSH_TYPES.SPRAY, Droplet, "Spray"], [BRUSH_TYPES.FLOWER, Flower2, "Flower"]].map(([type, Icon, label]) => (
@@ -836,35 +887,20 @@ export default function FlowerGarden() {
                   </button>
                 ))}
               </div>
-
-              {/* canvas */}
               <div className="rounded-xl overflow-hidden border-2 border-[#C8E6C9] bg-white mx-auto" style={{ maxWidth: 520 }}>
-                <canvas
-                  ref={canvasRef}
-                  width={500}
-                  height={400}
-                  className="w-full cursor-crosshair block"
-                  style={{ touchAction: "none" }}
-                  onMouseDown={startDrawing}
-                  onMouseMove={draw}
-                  onMouseUp={stopDrawing}
-                  onMouseLeave={stopDrawing}
-                />
+                <canvas ref={canvasRef} width={500} height={400}
+                  className="w-full cursor-crosshair block" style={{ touchAction: "none" }}
+                  onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseLeave={stopDrawing} />
               </div>
-
-              {/* actions */}
               <div className="flex flex-wrap gap-2 justify-between">
                 <div className="flex gap-2">
-                  <button onClick={undo} disabled={!canUndo}
-                    className="px-3 py-2 rounded-lg border text-sm disabled:opacity-40">
+                  <button onClick={undo} disabled={!canUndo} className="px-3 py-2 rounded-lg border text-sm disabled:opacity-40">
                     <Undo2 size={14} className="inline mr-1" /> Undo
                   </button>
-                  <button onClick={redo} disabled={!canRedo}
-                    className="px-3 py-2 rounded-lg border text-sm disabled:opacity-40">
+                  <button onClick={redo} disabled={!canRedo} className="px-3 py-2 rounded-lg border text-sm disabled:opacity-40">
                     <Redo2 size={14} className="inline mr-1" /> Redo
                   </button>
-                  <button onClick={clearCanvas}
-                    className="px-3 py-2 rounded-lg border text-sm">
+                  <button onClick={clearCanvas} className="px-3 py-2 rounded-lg border text-sm">
                     <RotateCcw size={14} className="inline mr-1" /> Clear
                   </button>
                 </div>
